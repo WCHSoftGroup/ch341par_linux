@@ -185,6 +185,15 @@ extern bool CH347SPI_GetHwStreamCfg(int fd, StreamHwCfgS *StreamCfg);
 extern bool CH347SPI_SetFrequency(int fd, uint32_t iSpiSpeedHz);
 
 /**
+ * CH347SPI_SetAutoCS - SPI auto chipselect setting for CH347SPI_WriteRead
+ * @fd: file descriptor of device
+ * @disable: SPI auto chipselect setting switch, true on disable CS automatic control
+ *
+ * The function return true if successful, false if fail.
+ */
+extern bool CH347SPI_SetAutoCS(int fd, bool disable);
+
+/**
  * CH347SPI_SetDataBits - SPI data bits setting
  * @fd: file descriptor of device
  * @iDataBits: 0: 8bit, 1: 16bit 
@@ -325,6 +334,61 @@ extern bool CH347Jtag_INIT(int fd, uint8_t iClockRate);
  * The function return true if successful, false if fail.
  */
 extern bool CH347Jtag_GetCfg(int fd, uint8_t *ClockRate);
+
+/**
+ * CH347Jtag_ClockTms - change TMS value on the rising edge of TCK to switch its Tap state
+ * @BitBangPkt: protocol package
+ * @Tms: TMS value to change
+ * @BI: length of protocol package
+ *
+ * The function return length of protocol package.
+ */
+extern uint32_t CH347Jtag_ClockTms(uint8_t *BitBangPkt, uint32_t Tms, uint32_t BI);
+
+/**
+ * CH347Jtag_IdleClock - ensure the clock is in low status
+ * @BitBangPkt: protocol package
+ * @BI: length of protocol package
+ *
+ * The function return length of protocol package.
+ */
+extern uint32_t CH347Jtag_IdleClock(uint8_t *BitBangPkt, uint32_t BI);
+
+/**
+ * CH347Jtag_TmsChange - change TMS value to switch state
+ * @fd: file descriptor of device
+ * @tmsValue: pointer to TMS value, unit: byte
+ * @Step: The valid bits which stored in tmsValue
+ * @Skip: valid start bit
+ *
+ * The function return true if successful, false if fail.
+ */
+extern bool CH347Jtag_TmsChange(int fd, uint8_t *tmsValue, uint32_t Step, uint32_t Skip);
+
+/**
+ * CH347Jtag_IoScan - Read and write in the Shift-DR/IR state, and switch to Exit DR/IR after execution
+ * State machine change: Shift-DR/IR.RW.->Exit DR/IR
+ * @fd: file descriptor of device
+ * @DataBits: data bits to be transmitted
+ * @DataBitsNb: number of bits to be transmitted
+ * @IsRead: whether to read data
+ * 
+ * The function return true if successful, false if fail.
+ */
+extern bool CH347Jtag_IoScan(int fd, uint8_t *DataBits, uint32_t DataBitsNb, bool IsRead);
+
+/**
+ * CH347Jtag_IoScanT - Read and write in the Shift-DR/IR state, if it is the last package, switch to Exit DR/IR; if not, stop at Shift-DR/IR
+ * State machine change: Shift-DR/IR.RW..->[Exit DR/IR]
+ * @fd: file descriptor of device
+ * @DataBits: data bits to be transmitted
+ * @DataBitsNb: number of bits to be transmitted
+ * @IsRead: whether to read data
+ * @IsLastPkt: whether the last package
+ * 
+ * The function return true if successful, false if fail.
+ */
+extern bool CH347Jtag_IoScanT(int fd, uint8_t *DataBits, uint32_t DataBitsNb, bool IsRead, bool IsLastPkt);
 
 /**
  * CH347Jtag_WriteRead - bitband mode JTAG IR/DR data read and write which is applicable for a small amount of data. Exp: command operation, state machine switching and other control transmission. For batch data transmission, it is recommended to use CH347Jtag_ WriteRead_Fast

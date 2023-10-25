@@ -1,5 +1,5 @@
-#ifndef _CH34X_LIB_H
-#define _CH34X_LIB_H
+#ifndef _CH341_LIB_H
+#define _CH341_LIB_H
 
 typedef enum _EEPROM_TYPE {
 	ID_24C01,
@@ -28,6 +28,10 @@ typedef enum {
 	TYPE_HID,
 	TYPE_VCP,
 } FUNCTYPE;
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /**
  * CH34XOpenDevice - open device
@@ -387,5 +391,9 @@ extern bool CH34xStreamSPIx(int fd, uint32_t iChipSelect, uint32_t iLength, void
  * The function return true if successful, false if fail.
  */
 extern bool CH34xStreamSPI4(int fd, uint32_t iChipSelect, uint32_t iLength, void *ioBuffer);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

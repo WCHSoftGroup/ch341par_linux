@@ -1,8 +1,8 @@
-# ch341/ch347 linux SDK
+# ch347/ch341 linux SDK
 
 ## Description
 
-This directory contains 3 parts, usb device driver, application library and examples. This driver and applications support usb bus interface chip ch341 and ch347, ch341 implements full-speed usb to uart/spi/i2c/gpio/parport/etc., ch347 implements high-speed usb to uart/jtag/swd/spi/i2c/gpio/etc. This driver is not applicable to uart.
+This directory contains 3 parts, usb device driver, application library and examples. This driver and applications support usb bus interface chip ch347 and ch341, ch347 implements high-speed usb to uart/jtag/swd/spi/i2c/gpio/etc., ch341 implements full-speed usb to uart/spi/i2c/gpio/parport/etc. This driver is not applicable to uart.
 
 ## Driver Operating Overview
 
@@ -14,9 +14,9 @@ This directory contains 3 parts, usb device driver, application library and exam
 6. Type "sudo make install" to make the driver work permanently
 7. Type "sudo make uninstall" to remove the driver
 
-Before the driver works, you should make sure that the ch341/ch347 device has been plugged in and is working properly, you can use shell command "lsusb" or "dmesg" to confirm that, VID of ch341/ch347 is [1A86].
+Before the driver works, you should make sure that the ch347/ch341 device has been plugged in and is working properly, you can use shell command "lsusb" or "dmesg" to confirm that, VID of ch347/ch341 is [0x1A86].
 
-If ch341/ch347 device works well, the driver will created devices named "ch34x_pis*" in /dev directory.
+If ch347/ch341 device works well, the driver will created devices named "ch34x_pis*" in /dev directory.
 
 ## Application Operating Overview
 
@@ -26,31 +26,31 @@ If ch341/ch347 device works well, the driver will created devices named "ch34x_p
 
 ## Note
 
-**ch341 supports 3 modes:**
+**ch347f supports 2 modes:**
 
-mode0: [uart]
+​	mode0: [uart * 2 + spi + i2c + jtag] in vcp driver mode, the devices are named /dev/ch34x_pis* and /dev/tty*
 
-mode1: [spi + i2c + parallel + gpio]
-
-mode2: [printer]
+​	mode1: [uart * 2 + spi + i2c] in hid driver mode, the devices are named /dev/hidraw* 
 
 **ch347t supports 4 modes:**
 
-mode0: [uart * 2] in vcp/cdc driver mode, the devices are named /dev/tty*
+​	mode0: [uart * 2] in vcp/cdc driver mode, the devices are named /dev/tty*
 
-mode1: [spi + i2c + uart * 1] in vcp driver mode, the devices are named /dev/ch34x_pis* and /dev/tty*
+​	mode1: [spi + i2c + uart * 1] in vcp driver mode, the devices are named /dev/ch34x_pis* and /dev/tty*
 
-mode2: [spi + i2c + uart * 1] in hid driver mode, the devices are named /dev/hidraw*
+​	mode2: [spi + i2c + uart * 1] in hid driver mode, the devices are named /dev/hidraw*
 
-mode3: [jtag + uart * 1] in vcp driver mode, the devices are named /dev/ch34x_pis* and /dev/tty*
+​	mode3: [jtag + uart * 1] in vcp driver mode, the devices are named /dev/ch34x_pis* and /dev/tty*
 
-This driver only can be used with **ch341 mode1** or **ch347t mode1/mode3**.
+**ch341 supports 3 modes:**
 
-**ch347f supports 2 modes:**
+​	mode0: [uart]
 
-mode0: [uart * 2 + spi + i2c + jtag] in vcp driver mode, the devices are named /dev/ch34x_pis* and /dev/tty*
+​	mode1: [spi + i2c + parallel + gpio]
 
-mode1: [uart * 2 + spi + i2c] in hid driver mode, the devices are named /dev/hidraw* 
+​	mode2: [printer]
+
+This driver can be used with **ch347f**, **ch347t mode1/mode3** or **ch341 mode1**.
 
 This application library and examples can be used with all modes.
 

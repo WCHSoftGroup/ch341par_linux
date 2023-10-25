@@ -14,7 +14,7 @@
  * V1.0 - initial version
  * V1.1 - fix ioctl bugs when copy data from user space
  * V1.2 - fix write & read & ioctl bugs
- * V1.3 - add support of ch347t chip
+ * V1.3 - add support of ch347t
  * V1.4 - add support of gpio interrupt function, spi slave mode, etc.
  *      - add support of ch347f
  */
@@ -40,7 +40,7 @@
 
 #define DRIVER_AUTHOR "WCH"
 #define DRIVER_DESC   "USB to multiple interface driver for ch341/ch347, etc."
-#define VERSION_DESC  "V1.5 On 2023.07"
+#define VERSION_DESC  "V1.4 On 2023.09"
 
 #define CH34x_MINOR_BASE    200
 #define CH341_PACKET_LENGTH 32
@@ -1558,8 +1558,9 @@ static void ch34x_usb_free_device(struct ch34x_pis *ch34x_dev)
 static void ch34x_delete(struct kref *kref)
 {
 	struct ch34x_pis *ch34x_dev = container_of(kref, struct ch34x_pis, kref);
-	usb_put_dev(ch34x_dev->udev);
 
+	usb_put_dev(ch34x_dev->udev);
+	ch34x_usb_free_device(ch34x_dev);
 	kfree(ch34x_dev);
 }
 
@@ -1569,11 +1570,17 @@ static void ch34x_pis_disconnect(struct usb_interface *intf)
 	int minor = intf->minor;
 
 	ch34x_dev = usb_get_intfdata(intf);
-	usb_set_intfdata(ch34x_dev->interface, NULL);
+	usb_set_intfdata(intf, NULL);
 
 	/* give back our minor */
 	usb_deregister_dev(intf, &ch34x_class);
-	ch34x_usb_free_device(ch34x_dev);
+
+	/* prevent more I/O from starting */
+	mutex_lock(&ch34x_dev->io_mutex);
+	ch34x_dev->interface = NULL;
+	mutex_unlock(&ch34x_dev->io_mutex);
+
+	usb_kill_anchored_urbs(&ch34x_dev->submitted);
 
 	/* decrement our usage count*/
 	kref_put(&ch34x_dev->kref, ch34x_delete);

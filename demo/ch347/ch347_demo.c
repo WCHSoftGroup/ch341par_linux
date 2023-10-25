@@ -70,10 +70,15 @@ bool CH347_SPI_Init()
 
 	/* set spi interface in [mode3] & [15MHz] & [MSB] & output [0xFF] by default */
 	SpiCfg.iMode = 3;
-	SpiCfg.iSpiSpeedHz = 30e6;
 	SpiCfg.iByteOrder = 1;
 	SpiCfg.iSpiOutDefaultData = 0xFF;
 	SpiCfg.iChipSelect = 0x80;
+
+	ret = CH347SPI_SetFrequency(ch347device.fd, 30e6);
+	if (!ret) {
+		printf("Failed to set SPI frequency.\n");
+		return false;
+	}
 
 	/* init spi interface */
 	ret = CH347SPI_Init(ch347device.fd, &SpiCfg);
@@ -501,7 +506,6 @@ bool CH347_SPI_Slave_Init()
 	mSpiCfgS SpiCfg = { 0 };
 
 	/* set spi interface in spi slave mode, [mode3] & [MSB] & output [0xFF] by default */
-	SpiCfg.iSpiSpeedHz = 30e6;
 	SpiCfg.iByteOrder = 1;
 	SpiCfg.iSpiOutDefaultData = 0xFF;
 	SpiCfg.iMode = 0x83;
@@ -532,10 +536,19 @@ void ch34x_demo_spi_slave_operate(bool enable)
 			return;
 		}
 		printf("CH347 SPI interface init succeed.\n");
+
+		ret = CH347SPI_Slave_FIFOReset(ch347device.fd);
+		if (ret == false) {
+			printf("Failed to reset SPI slave fifo.\n");
+			return;
+		}
+		printf("CH347 SPI slave fifo reset succeed.\n");
+
 		ret = CH347SPI_Slave_Control(ch347device.fd, true);
 		if (!ret)
 			return;
 		printf("Begin read data in slave mode.\n");
+		
 		while (1) {
 			ret = CH347SPI_Slave_QweryData(ch347device.fd, &oLength);
 			if (!ret) {
@@ -568,7 +581,32 @@ exit:
 	CH347SPI_Slave_Control(ch347device.fd, false);
 }
 
-static void ch34x_demo_gpio_operate()
+static void ch34x_demo_gpio_input_operate()
+{
+	bool ret;
+	int i, j;
+	int gpiocount = 8;
+	uint8_t iDir = 0xff;
+	uint8_t iData = 0x00;
+
+	ret = CH347GPIO_Get(ch347device.fd, &iDir, &iData);
+	if (ret == false) {
+		printf("CH347GPIO_Set error.\n");
+		return;
+	}
+
+	printf("\n********** GPIO Input Start **********\n\n");
+	for (i = 0; i < gpiocount; i++) {
+		if ((iData & (1 << i)))
+			printf("H");
+		else
+			printf("L");
+	}
+	printf("\n");
+	printf("\n********** GPIO Input End **********\n\n");
+}
+
+static void ch34x_demo_gpio_output_operate()
 {
 	bool ret;
 	int i, j;
@@ -627,7 +665,7 @@ void ch34x_demo_uart_operate()
 	bool ret = false;
 	uint8_t iBuffer[256];
 	uint8_t oBuffer[256];
-	uint32_t ioLength;
+	int ioLength;
 	int i;
 
 	ioLength = 256;
@@ -701,9 +739,12 @@ bool Show_DevMsg(char *pathname)
 			else if (info.product == 0x55e5)
 				ch347device.chiptype = CHIP_CH347F;
 			else {
-				printf("Current HID device is not CH347.\n");
+				printf("Current HID device PID is not CH347.\n");
 				return -1;
 			}
+		} else {
+			printf("Current HID device VID is not CH347.\n");
+			return -1;
 		}
 
 		/* Get Physical Location */
@@ -726,7 +767,7 @@ bool Show_DevMsg(char *pathname)
 			if (strstr(buf, "input0")) {
 				ch347device.functype = FUNC_UART;
 				printf("Device operating has function [UART].\n");
-			} else if (strstr(buf, "input1")) {
+			} else if (strstr(buf, "input2")) {
 				ch347device.functype = FUNC_UART;
 				printf("Device operating has function [UART].\n");
 			} else {
@@ -833,7 +874,7 @@ int main(int argc, char *argv[])
 	case FUNC_SPI_I2C_JTAG_GPIO:
 		while (1) {
 			printf("\npress f to operate spi flash, e to operate eeprom,\n"
-			       "g to operate gpio interface, j to operate jtag interface,\n"
+			       "a to get gpio status, g to gpio output test, j to operate jtag interface,\n"
 			       "s to enable spi slave mode, o to disable spi slave mode,\n"
 			       "i to enable interrupt, d to disable interrupt, q to quit.\n");
 
@@ -852,9 +893,13 @@ int main(int argc, char *argv[])
 				printf("EEPROM Test begin.\n");
 				ch34x_demo_eeprom_operate();
 				break;
+			case 'a':
+				printf("GPIO Input Test Begin.\n");
+				ch34x_demo_gpio_input_operate();
+				break;
 			case 'g':
-				printf("GPIO Test begin.\n");
-				ch34x_demo_gpio_operate();
+				printf("GPIO Output Test Begin.\n");
+				ch34x_demo_gpio_output_operate();
 				break;
 			case 'i':
 				printf("IRQ Test Begin.");
@@ -896,8 +941,8 @@ int main(int argc, char *argv[])
 		break;
 	case FUNC_JTAG_GPIO:
 		while (1) {
-			printf("\npress j to operate jtag interface, g to operate gpio interface,\n"
-			       "q to quit.\n");
+			printf("\npress j to operate jtag interface, a to get gpio status,\n"
+			       "g to gpio output test q to quit.\n");
 
 			scanf("%c", &choice);
 			while ((ch = getchar()) != EOF && ch != '\n')
@@ -910,9 +955,13 @@ int main(int argc, char *argv[])
 				printf("JTAG Test begin.\n");
 				ch34x_demo_jtag_operate();
 				break;
+			case 'a':
+				printf("GPIO Input Test Begin.\n");
+				ch34x_demo_gpio_input_operate();
+				break;
 			case 'g':
 				printf("GPIO Test begin.\n");
-				ch34x_demo_gpio_operate();
+				ch34x_demo_gpio_output_operate();
 			default:
 				printf("Bad choice, please input again.\n");
 				break;
