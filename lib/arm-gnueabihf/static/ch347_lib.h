@@ -5,6 +5,10 @@
 
 #pragma pack(1)
 
+#define ERR_INVAL	-1
+#define ERR_RANGE	-2
+#define ERR_IOCTL	-3
+
 #define CH347_SPI_MAX_FREQ 60e6
 #define CH347_SPI_MIN_FREQ 218750
 
@@ -106,6 +110,11 @@ extern "C" {
 #endif
 
 /**
+ * CH347GetLibInfo - get ch347 library information
+ */
+extern const char *CH347GetLibInfo(void);
+
+/**
  * CH347OpenDevice - open device
  * @pathname: device path in /dev directory
  *
@@ -165,6 +174,14 @@ extern bool CH347WriteRead(int fd, int iWriteLength, void *iWriteBuffer, int iRe
  * The function return true if successful, false if fail.
  */
 extern bool CH347SetTimeout(int fd, uint32_t iWriteTimeout, uint32_t iReadTimeout);
+
+/**
+ * CH347_OE_Enable - CH347F chip OE switch
+ * @fd: file descriptor of device
+ *
+ * The function return true if successful, false if fail.
+ */
+extern bool CH347_OE_Enable(int fd);
 
 /**
  * CH347SPI_GetHwStreamCfg - get spi setting from hardware
@@ -307,6 +324,7 @@ extern bool CH347SPI_Slave_QweryData(int fd, uint32_t *oLength);
  * The function return true if successful, false if fail.
  */
 extern bool CH347SPI_Slave_FIFOReset(int fd);
+
 /**
  * CH347SPI_Slave_ReadData - read spi data in slave mode
  * @fd: file descriptor of device
@@ -318,7 +336,25 @@ extern bool CH347SPI_Slave_FIFOReset(int fd);
 extern bool CH347SPI_Slave_ReadData(int fd, void *oReadBuffer, uint32_t *oReadLength);
 
 /**
- * CH347Jtag_INIT - JTGA interface initialization, mode and speed setting
+ * CH347Jtag_Reset - Reset Tap Status, more than six consecutive TCK and TMS is high 
+ * 					will set the state machine to the Test-Logic Reset state.
+ * @fd: file descriptor of device
+ *
+ * The function return true if successful, false if fail.
+ */
+extern int CH347Jtag_Reset(int fd);
+
+/**
+ * CH347Jtag_ResetTrst - Hard-reset JTAG device
+ * @fd: file descriptor of device
+ * @TRSTLevel: reset level, true on high, false on low
+ *
+ * The function return true if successful, false if fail.
+ */
+extern bool CH347Jtag_ResetTrst(int fd, bool TRSTLevel);
+
+/**
+ * CH347Jtag_INIT - JTAG interface initialization, mode and speed setting
  * @fd: file descriptor of device
  * @iClockRate: communication speed, valid value is 0-5, the higher the value, the faster the speed
  *
@@ -327,7 +363,7 @@ extern bool CH347SPI_Slave_ReadData(int fd, void *oReadBuffer, uint32_t *oReadLe
 extern bool CH347Jtag_INIT(int fd, uint8_t iClockRate);
 
 /**
- * CH347Jtag_GetCfg - get JTGA speed setting
+ * CH347Jtag_GetCfg - get JTAG speed setting
  * @fd: file descriptor of device
  * @iClockRate: pointer to communication speed, valid value is 0-5, the higher the value, the faster the speed
  *
@@ -673,11 +709,20 @@ extern bool CH347I2C_SetStretch(int fd, bool enable);
 /**
  * CH347I2C_SetDelaymS - delay operation
  * @fd: file descriptor of device
- * @iDelay: delay time in millseconds
+ * @iDelay: delay time in millseconds, 0~500 valid
  *
  * The function return true if successful, false if fail.
  */
 extern bool CH347I2C_SetDelaymS(int fd, int iDelay);
+
+/**
+ * CH347I2C_SetAckClk_DelayuS - setting delay time between the 8th and 9th I2C clock
+ * @fd: file descriptor of device
+ * @iDelay: delay time in microseconds, max: 0x3ff
+ *
+ * The function return true if successful, false if fail.
+ */
+extern bool CH347I2C_SetAckClk_DelayuS(int fd, int iDelay);
 
 /**
  * CH347StreamI2C - write/read i2c in stream mode

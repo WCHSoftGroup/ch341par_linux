@@ -710,6 +710,8 @@ bool Show_DevMsg(char *pathname)
 	uint16_t vendor, product;
 	CHIP_TYPE chiptype;
 
+	printf("Library version: %s\n", CH347GetLibInfo());
+
 	if (strstr(pathname, "tty")) {
 		printf("Device operating has function [UART].\n");
 		ch347device.functype = FUNC_UART;

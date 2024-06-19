@@ -17,6 +17,7 @@
  * V1.3 - add support of ch347t
  * V1.4 - add support of gpio interrupt function, spi slave mode, etc.
  *      - add support of ch347f
+ * V1.5 - add support of ch339w
  */
 
 #define DEBUG
@@ -40,7 +41,7 @@
 
 #define DRIVER_AUTHOR "WCH"
 #define DRIVER_DESC   "USB to multiple interface driver for ch341/ch347, etc."
-#define VERSION_DESC  "V1.4 On 2023.09"
+#define VERSION_DESC  "V1.5 On 2024.06"
 
 #define CH34x_MINOR_BASE    200
 #define CH341_PACKET_LENGTH 32
@@ -100,6 +101,7 @@ static const struct usb_device_id ch34x_usb_ids[] = {
 	{ USB_DEVICE_INTERFACE_NUMBER(0x1a86, 0x55db, 0x02) }, /* CH347T Mode1 SPI+IIC+UART */
 	{ USB_DEVICE_INTERFACE_NUMBER(0x1a86, 0x55dd, 0x02) }, /* CH347T Mode3 JTAG+UART */
 	{ USB_DEVICE_INTERFACE_NUMBER(0x1a86, 0x55de, 0x04) }, /* CH347F */
+	{ USB_DEVICE_INTERFACE_NUMBER(0x1a86, 0x55e7, 0x02) }, /* CH339W */
 	{}						       /* Terminating entry */
 };
 
@@ -109,6 +111,7 @@ typedef enum _CHIP_TYPE {
 	CHIP_CH341 = 0,
 	CHIP_CH347T = 1,
 	CHIP_CH347F = 2,
+	CHIP_CH339W = 3,
 } CHIP_TYPE;
 
 #define WRITES_IN_FLIGHT 8
@@ -299,9 +302,11 @@ ssize_t ch34x_fops_read(struct file *file, char __user *to_user, size_t count, l
 		totallen += actual_len;
 	}
 exit1:
-	kfree(ch34x_dev->bulk_in_buffer);
+	if (ch34x_dev->bulk_in_buffer)
+		kfree(ch34x_dev->bulk_in_buffer);
 exit:
-	kfree(ibuf);
+	if (ibuf)
+		kfree(ibuf);
 	return retval == 0 ? totallen : retval;
 }
 
@@ -435,6 +440,9 @@ ssize_t ch34x_fops_write(struct file *file, const char __user *user_buffer, size
 	 */
 	usb_free_urb(urb);
 
+	if (buf)
+		kfree(buf);
+
 	return count;
 
 error_unanchor:
@@ -519,7 +527,8 @@ static int ch34x_data_read(struct ch34x_pis *ch34x_dev, void *obuffer, u32 bytes
 		retval = -ENOMEM;
 
 error:
-	kfree(obuf);
+	if (obuf)
+		kfree(obuf);
 exit:
 	return retval == 0 ? bytes_read : retval;
 }
@@ -747,10 +756,13 @@ send:
 		goto error1;
 	}
 
+	if (obuf)
+		kfree(obuf);
 	return totallen;
 
 error1:
-	kfree(obuf);
+	if (obuf)
+		kfree(obuf);
 	return retval;
 error_unanchor:
 	usb_unanchor_urb(urb);
@@ -888,7 +900,8 @@ static int ch34x_slave_fifo_read(struct ch34x_pis *ch34x_dev, void *obuffer, u32
 		retval = -ENOMEM;
 
 error:
-	kfree(obuf);
+	if (obuf)
+		kfree(obuf);
 exit:
 	return retval == 0 ? bytes_read : retval;
 }
@@ -1172,7 +1185,8 @@ static long ch34x_fops_ioctl(struct file *file, unsigned int ch34x_cmd, unsigned
 	}
 
 exit:
-	kfree(buf);
+	if (buf)
+		kfree(buf);
 	return retval;
 }
 
@@ -1188,6 +1202,13 @@ static int ch34x_fops_fasync(int fd, struct file *file, int on)
 	return fasync_helper(fd, file, on, &ch34x_dev->fasync);
 }
 
+#ifdef CONFIG_COMPAT
+long ch34x_fops_compat_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+{
+	return ch34x_fops_ioctl(filp, cmd, arg);
+}
+#endif
+
 static const struct file_operations ch34x_fops_driver = {
 	.owner = THIS_MODULE,
 	.open = ch34x_fops_open,
@@ -1198,6 +1219,9 @@ static const struct file_operations ch34x_fops_driver = {
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(2, 6, 35))
 	.ioctl = ch34x_fops_ioctl,
 #else
+#ifdef CONFIG_COMPAT
+	.compat_ioctl = ch34x_fops_compat_ioctl,
+#endif
 	.unlocked_ioctl = ch34x_fops_ioctl,
 #endif
 	.fasync = ch34x_fops_fasync,
@@ -1422,6 +1446,8 @@ static int ch34x_pis_probe(struct usb_interface *intf, const struct usb_device_i
 		ch34x_dev->chiptype = CHIP_CH341;
 	else if (id->idProduct == 0x55de)
 		ch34x_dev->chiptype = CHIP_CH347F;
+	else if (id->idProduct == 0x55e7)
+		ch34x_dev->chiptype = CHIP_CH339W;
 	else
 		ch34x_dev->chiptype = CHIP_CH347T;
 

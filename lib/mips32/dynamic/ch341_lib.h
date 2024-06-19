@@ -21,6 +21,7 @@ typedef enum _CHIP_TYPE {
 	CHIP_CH341 = 0,
 	CHIP_CH347T = 1,
 	CHIP_CH347F = 2,
+	CHIP_CH339W = 3,
 } CHIP_TYPE;
 
 typedef enum {
