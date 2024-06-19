@@ -5,6 +5,10 @@
 
 #pragma pack(1)
 
+#define ERR_INVAL	-1
+#define ERR_RANGE	-2
+#define ERR_IOCTL	-3
+
 #define CH347_SPI_MAX_FREQ 60e6
 #define CH347_SPI_MIN_FREQ 218750
 
@@ -106,6 +110,11 @@ extern "C" {
 #endif
 
 /**
+ * CH347GetLibInfo - get ch347 library information
+ */
+extern const char *CH347GetLibInfo(void);
+
+/**
  * CH347OpenDevice - open device
  * @pathname: device path in /dev directory
  *
@@ -167,6 +176,14 @@ extern bool CH347WriteRead(int fd, int iWriteLength, void *iWriteBuffer, int iRe
 extern bool CH347SetTimeout(int fd, uint32_t iWriteTimeout, uint32_t iReadTimeout);
 
 /**
+ * CH347_OE_Enable - CH347F chip OE switch
+ * @fd: file descriptor of device
+ *
+ * The function return true if successful, false if fail.
+ */
+extern bool CH347_OE_Enable(int fd);
+
+/**
  * CH347SPI_GetHwStreamCfg - get spi setting from hardware
  * @fd: file descriptor of device
  * @StreamCfg: pointer to SPI stream configuration
@@ -183,6 +200,15 @@ extern bool CH347SPI_GetHwStreamCfg(int fd, StreamHwCfgS *StreamCfg);
  * The function return true if successful, false if fail.
  */
 extern bool CH347SPI_SetFrequency(int fd, uint32_t iSpiSpeedHz);
+
+/**
+ * CH347SPI_SetAutoCS - SPI auto chipselect setting for CH347SPI_WriteRead
+ * @fd: file descriptor of device
+ * @disable: SPI auto chipselect setting switch, true on disable CS automatic control
+ *
+ * The function return true if successful, false if fail.
+ */
+extern bool CH347SPI_SetAutoCS(int fd, bool disable);
 
 /**
  * CH347SPI_SetDataBits - SPI data bits setting
@@ -298,6 +324,7 @@ extern bool CH347SPI_Slave_QweryData(int fd, uint32_t *oLength);
  * The function return true if successful, false if fail.
  */
 extern bool CH347SPI_Slave_FIFOReset(int fd);
+
 /**
  * CH347SPI_Slave_ReadData - read spi data in slave mode
  * @fd: file descriptor of device
@@ -309,7 +336,25 @@ extern bool CH347SPI_Slave_FIFOReset(int fd);
 extern bool CH347SPI_Slave_ReadData(int fd, void *oReadBuffer, uint32_t *oReadLength);
 
 /**
- * CH347Jtag_INIT - JTGA interface initialization, mode and speed setting
+ * CH347Jtag_Reset - Reset Tap Status, more than six consecutive TCK and TMS is high 
+ * 					will set the state machine to the Test-Logic Reset state.
+ * @fd: file descriptor of device
+ *
+ * The function return true if successful, false if fail.
+ */
+extern int CH347Jtag_Reset(int fd);
+
+/**
+ * CH347Jtag_ResetTrst - Hard-reset JTAG device
+ * @fd: file descriptor of device
+ * @TRSTLevel: reset level, true on high, false on low
+ *
+ * The function return true if successful, false if fail.
+ */
+extern bool CH347Jtag_ResetTrst(int fd, bool TRSTLevel);
+
+/**
+ * CH347Jtag_INIT - JTAG interface initialization, mode and speed setting
  * @fd: file descriptor of device
  * @iClockRate: communication speed, valid value is 0-5, the higher the value, the faster the speed
  *
@@ -318,13 +363,68 @@ extern bool CH347SPI_Slave_ReadData(int fd, void *oReadBuffer, uint32_t *oReadLe
 extern bool CH347Jtag_INIT(int fd, uint8_t iClockRate);
 
 /**
- * CH347Jtag_GetCfg - get JTGA speed setting
+ * CH347Jtag_GetCfg - get JTAG speed setting
  * @fd: file descriptor of device
  * @iClockRate: pointer to communication speed, valid value is 0-5, the higher the value, the faster the speed
  *
  * The function return true if successful, false if fail.
  */
 extern bool CH347Jtag_GetCfg(int fd, uint8_t *ClockRate);
+
+/**
+ * CH347Jtag_ClockTms - change TMS value on the rising edge of TCK to switch its Tap state
+ * @BitBangPkt: protocol package
+ * @Tms: TMS value to change
+ * @BI: length of protocol package
+ *
+ * The function return length of protocol package.
+ */
+extern uint32_t CH347Jtag_ClockTms(uint8_t *BitBangPkt, uint32_t Tms, uint32_t BI);
+
+/**
+ * CH347Jtag_IdleClock - ensure the clock is in low status
+ * @BitBangPkt: protocol package
+ * @BI: length of protocol package
+ *
+ * The function return length of protocol package.
+ */
+extern uint32_t CH347Jtag_IdleClock(uint8_t *BitBangPkt, uint32_t BI);
+
+/**
+ * CH347Jtag_TmsChange - change TMS value to switch state
+ * @fd: file descriptor of device
+ * @tmsValue: pointer to TMS value, unit: byte
+ * @Step: The valid bits which stored in tmsValue
+ * @Skip: valid start bit
+ *
+ * The function return true if successful, false if fail.
+ */
+extern bool CH347Jtag_TmsChange(int fd, uint8_t *tmsValue, uint32_t Step, uint32_t Skip);
+
+/**
+ * CH347Jtag_IoScan - Read and write in the Shift-DR/IR state, and switch to Exit DR/IR after execution
+ * State machine change: Shift-DR/IR.RW.->Exit DR/IR
+ * @fd: file descriptor of device
+ * @DataBits: data bits to be transmitted
+ * @DataBitsNb: number of bits to be transmitted
+ * @IsRead: whether to read data
+ * 
+ * The function return true if successful, false if fail.
+ */
+extern bool CH347Jtag_IoScan(int fd, uint8_t *DataBits, uint32_t DataBitsNb, bool IsRead);
+
+/**
+ * CH347Jtag_IoScanT - Read and write in the Shift-DR/IR state, if it is the last package, switch to Exit DR/IR; if not, stop at Shift-DR/IR
+ * State machine change: Shift-DR/IR.RW..->[Exit DR/IR]
+ * @fd: file descriptor of device
+ * @DataBits: data bits to be transmitted
+ * @DataBitsNb: number of bits to be transmitted
+ * @IsRead: whether to read data
+ * @IsLastPkt: whether the last package
+ * 
+ * The function return true if successful, false if fail.
+ */
+extern bool CH347Jtag_IoScanT(int fd, uint8_t *DataBits, uint32_t DataBitsNb, bool IsRead, bool IsLastPkt);
 
 /**
  * CH347Jtag_WriteRead - bitband mode JTAG IR/DR data read and write which is applicable for a small amount of data. Exp: command operation, state machine switching and other control transmission. For batch data transmission, it is recommended to use CH347Jtag_ WriteRead_Fast
@@ -609,11 +709,20 @@ extern bool CH347I2C_SetStretch(int fd, bool enable);
 /**
  * CH347I2C_SetDelaymS - delay operation
  * @fd: file descriptor of device
- * @iDelay: delay time in millseconds
+ * @iDelay: delay time in millseconds, 0~500 valid
  *
  * The function return true if successful, false if fail.
  */
 extern bool CH347I2C_SetDelaymS(int fd, int iDelay);
+
+/**
+ * CH347I2C_SetAckClk_DelayuS - setting delay time between the 8th and 9th I2C clock
+ * @fd: file descriptor of device
+ * @iDelay: delay time in microseconds, max: 0x3ff
+ *
+ * The function return true if successful, false if fail.
+ */
+extern bool CH347I2C_SetAckClk_DelayuS(int fd, int iDelay);
 
 /**
  * CH347StreamI2C - write/read i2c in stream mode
