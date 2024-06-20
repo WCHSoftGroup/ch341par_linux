@@ -14,7 +14,9 @@ $ sudo dkms build -m ch34x_pis -v 1.5
 $ sudo dkms install -m ch34x_pis -v 1.5
 ```
 
-you can check the driver module information, the below context is on my system
+### module information
+
+check the driver module information by **modinfo**
 ```
 $ sudo modinfo /lib/modules/$(uname -r)/updates/dkms/ch34x_pis.ko
 filename:       /lib/modules/5.15.0-112-generic/updates/dkms/ch34x_pis.ko
@@ -50,3 +52,8 @@ signature:      55:C9:D5:E8:D0:A2:0B:99:6C:1C:B2:2B:D5:8C:D9:DB:56:E3:53:5D:
 		7A:58:39:39:7B:2F:D8:5B:CD:64:43:D3:FA:CA:EC:F1
 ```
 
+### Remove the dkms module
+
+```
+$ sudo dkms remove -m ch34x_pis -v 1.5 --all
+```
