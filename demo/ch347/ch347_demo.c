@@ -1,7 +1,7 @@
 /*
- * ch347 application demo
+ * ch347/ch339 application demo
  *
- * Copyright (C) 2023 Nanjing Qinheng Microelectronics Co., Ltd.
+ * Copyright (C) 2025 Nanjing Qinheng Microelectronics Co., Ltd.
  * Web:      http://wch.cn
  * Author:   WCH <tech@wch.cn>
  *
@@ -19,6 +19,7 @@
  * V1.4 - add gpio interrupt funciton, update with new library,
  *      - support more SPI and I2C stretching
  *      - support I2C clock stretch
+ * V1.5 - add support for ch339w
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -37,12 +38,13 @@
 
 #include "ch347_lib.h"
 
+#define CMD_FLASH_CHIP_ERASE 0x60
 #define CMD_FLASH_SECTOR_ERASE 0x20
-#define CMD_FLASH_BYTE_PROG    0x02
-#define CMD_FLASH_READ	       0x03
-#define CMD_FLASH_RDSR	       0x05
-#define CMD_FLASH_WREN	       0x06
-#define CMD_FLASH_JEDEC_ID     0x9F
+#define CMD_FLASH_BYTE_PROG 0x02
+#define CMD_FLASH_READ 0x03
+#define CMD_FLASH_RDSR 0x05
+#define CMD_FLASH_WREN 0x06
+#define CMD_FLASH_JEDEC_ID 0x9F
 
 #define SPI_FLASH_PerWritePageSize 256
 
@@ -63,6 +65,8 @@ struct ch34x {
 
 static struct ch34x ch347device;
 
+bool W25X_Flash_Write_Page(uint8_t *pBuf, uint32_t address, uint32_t len);
+bool Flash_Chip_Erase();
 bool CH347_SPI_Init()
 {
 	bool ret;
@@ -120,7 +124,8 @@ bool Flash_ID_Read()
 	ioBuffer[0] = CMD_FLASH_JEDEC_ID;
 	memset(ioBuffer + 1, 0xFF, 3);
 
-	if (CH347SPI_WriteRead(ch347device.fd, false, iChipSelect, iLength, ioBuffer) == false)
+	if (CH347SPI_WriteRead(ch347device.fd, false, iChipSelect, iLength,
+			       ioBuffer) == false)
 		return false;
 	else {
 		ioBuffer[0] = 0x00;
@@ -137,30 +142,79 @@ bool Flash_ID_Read()
 	return true;
 }
 
-unsigned int Flash_Block_Read(unsigned int address, uint8_t *pbuf, unsigned int len)
+unsigned int Flash_Block_Read(unsigned int address, uint8_t *pbuf,
+			      unsigned int len)
 {
 	int iChipSelect;
 	int iLength;
-	int oLength;
-	uint8_t ioBuffer[8192] = { 0 };
 
 	iChipSelect = 0x80;
 	iLength = 0x04;
-	oLength = len;
-	ioBuffer[0] = CMD_FLASH_READ;
-	ioBuffer[1] = (uint8_t)(address >> 16);
-	ioBuffer[2] = (uint8_t)(address >> 8);
-	ioBuffer[3] = (uint8_t)(address);
 
-	if (!CH347SPI_Read(ch347device.fd, false, iChipSelect, iLength, &oLength, ioBuffer)) {
+	*pbuf = CMD_FLASH_READ;
+	*(pbuf + 1) = (uint8_t)(address >> 16);
+	*(pbuf + 2) = (uint8_t)(address >> 8);
+	*(pbuf + 3) = (uint8_t)(address);
+
+	if (!CH347SPI_Read(ch347device.fd, false, iChipSelect, iLength,
+			   &len, pbuf)) {
 		printf("Flash_Block_Read read %d bytes failed.\n", len);
 		return 0;
-	} else
-		memcpy(pbuf, ioBuffer, oLength);
+	}
 
-	return oLength;
+	return len;
 }
 
+unsigned int Flash_Block_Write(unsigned int address, uint8_t *pbuf,
+			       unsigned int len)
+{
+	int ret;
+	int i = 0;
+	uint32_t DataLen = len, FlashAddr, NumOfPage, NumOfSingle;
+	double UseT;
+
+	static struct timeval t1, t2;
+	int delta_sec, delta_usec;
+	/* write flash from addr 0 */
+	FlashAddr = address;
+
+	NumOfPage = DataLen / SPI_FLASH_PerWritePageSize;
+	NumOfSingle = DataLen % SPI_FLASH_PerWritePageSize;
+
+	if (address % SPI_FLASH_PerWritePageSize) {
+		printf("Flash address is not page aligned!\n");
+		return false;
+	}
+	/* caculate flash write time */
+	gettimeofday(&t1, NULL);
+	while (NumOfPage--) {
+		ret = W25X_Flash_Write_Page(pbuf, FlashAddr,
+					    SPI_FLASH_PerWritePageSize);
+		if (ret == false)
+			goto exit;
+		pbuf += SPI_FLASH_PerWritePageSize;
+		FlashAddr += SPI_FLASH_PerWritePageSize;
+	}
+	if (NumOfSingle) {
+		ret = W25X_Flash_Write_Page(pbuf, FlashAddr, NumOfSingle);
+		if (ret == false)
+			goto exit;
+	}
+	gettimeofday(&t2, NULL);
+
+	delta_sec = t2.tv_sec - t1.tv_sec;
+	delta_usec = t2.tv_usec - t1.tv_usec;
+	UseT = ((float)delta_sec + (float)delta_usec / 1000000);
+
+	printf("\tFlash Write: Addr[0x%x] write %d bytes in %.3f seconds.\n",
+	       address, DataLen, UseT / 1000);
+
+	return FlashAddr;
+exit:
+	printf("\tFlash Write: Addr [0x%x] write %d bytes failed.\n",
+	       address, DataLen);
+	return FlashAddr;
+}
 bool Flash_Block_Read_Test()
 {
 	double UseT;
@@ -177,7 +231,8 @@ bool Flash_Block_Read_Test()
 	gettimeofday(&t1, NULL);
 	DataLen = Flash_Block_Read(FlashAddr, ioBuffer, DataLen);
 	if (DataLen <= 0) {
-		printf("\tFlash Read: Addr[0x%x] read %d bytes failed.\n", FlashAddr, DataLen);
+		printf("\tFlash Read: Addr[0x%x] read %d bytes failed.\n",
+		       FlashAddr, DataLen);
 		return false;
 	}
 	gettimeofday(&t2, NULL);
@@ -186,12 +241,53 @@ bool Flash_Block_Read_Test()
 	delta_usec = t2.tv_usec - t1.tv_usec;
 	UseT = (float)delta_sec + (float)delta_usec / 1000000;
 
-	printf("\tFlash Read: Addr[0x%x] read %d bytes in %.3f seconds.\n", FlashAddr, DataLen, UseT);
+	printf("\tFlash Read: Addr[0x%x] read %d bytes in %.3f seconds.\n",
+	       FlashAddr, DataLen, UseT);
 	for (i = 0; i < DataLen; i++)
 		sprintf(&FmtStr1[strlen(FmtStr1)], "%02x ", ioBuffer[i]);
 	printf("\nRead: \n%s\n\n", FmtStr1);
 
 	return true;
+}
+
+bool Flash_Block_Write_Test()
+{
+	int ret;
+	int i = 0;
+	uint32_t DataLen, FlashAddr, BeginAddr, NumOfPage, NumOfSingle;
+	uint8_t ioBuffer[0x500] = { 0 };
+	uint8_t *pbuf = ioBuffer;
+
+	/* write flash from addr 0 */
+	FlashAddr = 0x00;
+	BeginAddr = FlashAddr;
+	DataLen = 0x500;
+
+	for (i = 0; i < DataLen; i++)
+		ioBuffer[i] = i;
+
+	NumOfPage = DataLen / SPI_FLASH_PerWritePageSize;
+	NumOfSingle = DataLen % SPI_FLASH_PerWritePageSize;
+
+	while (NumOfPage--) {
+		ret = W25X_Flash_Write_Page(pbuf, FlashAddr,
+					    SPI_FLASH_PerWritePageSize);
+		if (ret == false)
+			goto exit;
+		pbuf += SPI_FLASH_PerWritePageSize;
+		FlashAddr += SPI_FLASH_PerWritePageSize;
+	}
+	if (NumOfSingle) {
+		ret = W25X_Flash_Write_Page(pbuf, FlashAddr, NumOfSingle);
+		if (ret == false)
+			goto exit;
+	}
+	return true;
+
+exit:
+	printf("\tFlash Write: Addr [0x%x] write %d bytes failed.\n",
+	       BeginAddr, DataLen);
+	return false;
 }
 
 bool Flash_Write_Enable()
@@ -204,23 +300,24 @@ bool Flash_Write_Enable()
 	iLength = 1;
 	ioBuffer = CMD_FLASH_WREN;
 
-	return CH347SPI_WriteRead(ch347device.fd, false, iChipSelect, iLength, &ioBuffer);
+	return CH347SPI_WriteRead(ch347device.fd, false, iChipSelect,
+				  iLength, &ioBuffer);
 }
 
-bool Flash_Wait()
+bool Flash_Wait(int retry_times)
 {
 	int iChipSelect;
 	int iLength;
 	uint8_t ioBuffer[2];
 	uint8_t status;
-	int retry_times = 1000;
 
 	iChipSelect = 0x80;
 	iLength = 2;
 
 	do {
 		ioBuffer[0] = CMD_FLASH_RDSR;
-		if (CH347SPI_WriteRead(ch347device.fd, false, iChipSelect, iLength, ioBuffer) == false)
+		if (CH347SPI_WriteRead(ch347device.fd, false, iChipSelect,
+				       iLength, ioBuffer) == false)
 			return false;
 		status = ioBuffer[1];
 		usleep(100);
@@ -248,10 +345,34 @@ bool Flash_Sector_Erase(uint32_t StartAddr)
 	ioBuffer[2] = (uint8_t)(StartAddr >> 8 & 0xf0);
 	ioBuffer[3] = 0x00;
 
-	if (CH347SPI_WriteRead(ch347device.fd, false, iChipSelect, iLength, ioBuffer) == false)
+	if (CH347SPI_WriteRead(ch347device.fd, false, iChipSelect, iLength,
+			       ioBuffer) == false)
 		return false;
 
-	if (Flash_Wait() == false)
+	if (Flash_Wait(1000) == false)
+		return false;
+
+	return true;
+}
+
+bool Flash_Chip_Erase()
+{
+	int iChipSelect;
+	int iLength;
+	uint8_t ioBuffer[1];
+
+	if (Flash_Write_Enable() == false)
+		return false;
+
+	iChipSelect = 0x80;
+	iLength = 1;
+	ioBuffer[0] = CMD_FLASH_CHIP_ERASE;
+
+	if (CH347SPI_WriteRead(ch347device.fd, false, iChipSelect, iLength,
+			       ioBuffer) == false)
+		return false;
+
+	if (Flash_Wait(10 * 10000) == false)
 		return false;
 
 	return true;
@@ -274,68 +395,17 @@ bool W25X_Flash_Write_Page(uint8_t *pBuf, uint32_t address, uint32_t len)
 	ioBuffer[3] = (uint8_t)address;
 	memcpy(&ioBuffer[4], pBuf, len);
 
-	if (CH347SPI_Write(ch347device.fd, false, iChipSelect, iLength, SPI_FLASH_PerWritePageSize + 4, ioBuffer) ==
-	    false)
+	if (CH347SPI_Write(ch347device.fd, false, iChipSelect, iLength,
+			   SPI_FLASH_PerWritePageSize + 4,
+			   ioBuffer) == false)
 		return false;
 
 	memset(ioBuffer, 0, sizeof(uint8_t) * len);
 
-	if (!Flash_Wait())
+	if (!Flash_Wait(1000))
 		return false;
 
 	return true;
-}
-
-bool Flash_Block_Write()
-{
-	int ret;
-	int i = 0;
-	uint32_t DataLen, FlashAddr, BeginAddr, NumOfPage, NumOfSingle;
-	uint8_t ioBuffer[0x500] = { 0 };
-	uint8_t *pbuf = ioBuffer;
-	double UseT;
-
-	static struct timeval t1, t2;
-	int delta_sec, delta_usec;
-
-	/* write flash from addr 0 */
-	FlashAddr = 0x00;
-	BeginAddr = FlashAddr;
-	DataLen = 0x500;
-
-	for (i = 0; i < DataLen; i++)
-		ioBuffer[i] = i;
-
-	NumOfPage = DataLen / SPI_FLASH_PerWritePageSize;
-	NumOfSingle = DataLen % SPI_FLASH_PerWritePageSize;
-
-	/* caculate flash write time */
-	gettimeofday(&t1, NULL);
-	while (NumOfPage--) {
-		ret = W25X_Flash_Write_Page(pbuf, FlashAddr, SPI_FLASH_PerWritePageSize);
-		if (ret == false)
-			goto exit;
-		pbuf += SPI_FLASH_PerWritePageSize;
-		FlashAddr += SPI_FLASH_PerWritePageSize;
-	}
-	if (NumOfSingle) {
-		ret = W25X_Flash_Write_Page(pbuf, FlashAddr, NumOfSingle);
-		if (ret == false)
-			goto exit;
-	}
-	gettimeofday(&t2, NULL);
-
-	delta_sec = t2.tv_sec - t1.tv_sec;
-	delta_usec = t2.tv_usec - t1.tv_usec;
-	UseT = ((float)delta_sec + (float)delta_usec / 1000000);
-
-	printf("\tFlash Write: Addr[0x%x] write %d bytes in %.3f seconds.\n", BeginAddr, DataLen, UseT / 1000);
-
-	return true;
-
-exit:
-	printf("\tFlash Write: Addr [0x%x] write %d bytes failed.\n", BeginAddr, DataLen);
-	return false;
 }
 
 bool EEPROM_Read()
@@ -383,7 +453,8 @@ bool EEPROM_Write()
 		iBuffer[i] = i;
 
 	printf("\nWrite EEPROM data:\n");
-	ret = CH347WriteEEPROM(ch347device.fd, eeprom, iAddr, iLength, iBuffer);
+	ret = CH347WriteEEPROM(ch347device.fd, eeprom, iAddr, iLength,
+			       iBuffer);
 	if (ret == false)
 		goto exit;
 
@@ -429,10 +500,11 @@ void ch34x_demo_flash_operate()
 		printf("Failed to erase flash.\n");
 		return;
 	}
-	printf("Erase one sector from Addr[0x%x] of flash succeed.\n", 0x00);
+	printf("Erase one sector from Addr[0x%x] of flash succeed.\n",
+	       0x00);
 
 	/* write flash block data */
-	ret = Flash_Block_Write();
+	ret = Flash_Block_Write_Test();
 	if (!ret) {
 		printf("Failed to write flash.\n");
 		return;
@@ -500,87 +572,6 @@ void ch34x_demo_jtag_operate()
 	return;
 }
 
-bool CH347_SPI_Slave_Init()
-{
-	bool ret;
-	mSpiCfgS SpiCfg = { 0 };
-
-	/* set spi interface in spi slave mode, [mode3] & [MSB] & output [0xFF] by default */
-	SpiCfg.iByteOrder = 1;
-	SpiCfg.iSpiOutDefaultData = 0xFF;
-	SpiCfg.iMode = 0x83;
-
-	/* init spi interface */
-	ret = CH347SPI_Init(ch347device.fd, &SpiCfg);
-	if (!ret) {
-		printf("Failed to init SPI interface.\n");
-		return false;
-	} else {
-		printf("SPI init slave ok.\n");
-	}
-
-	return true;
-}
-
-void ch34x_demo_spi_slave_operate(bool enable)
-{
-	bool ret = false;
-	uint8_t oBuffer[SPI_SLAVE_MAX_LENGTH];
-	uint32_t oLength;
-	int i;
-
-	if (enable) {
-		ret = CH347_SPI_Slave_Init();
-		if (ret == false) {
-			printf("Failed to init CH347 SPI interface.\n");
-			return;
-		}
-		printf("CH347 SPI interface init succeed.\n");
-
-		ret = CH347SPI_Slave_FIFOReset(ch347device.fd);
-		if (ret == false) {
-			printf("Failed to reset SPI slave fifo.\n");
-			return;
-		}
-		printf("CH347 SPI slave fifo reset succeed.\n");
-
-		ret = CH347SPI_Slave_Control(ch347device.fd, true);
-		if (!ret)
-			return;
-		printf("Begin read data in slave mode.\n");
-		
-		while (1) {
-			ret = CH347SPI_Slave_QweryData(ch347device.fd, &oLength);
-			if (!ret) {
-				printf("CH347SPI_Slave_QweryData failed.\n");
-				goto exit;
-			}
-			if (oLength == 0) {
-				usleep(10 * 1000);
-				continue;
-			}
-			ret = CH347SPI_Slave_ReadData(ch347device.fd, oBuffer, &oLength);
-			if (!ret) {
-				printf("CH347SPI_Slave_ReadData failed.\n");
-				goto exit;
-			}
-			printf("\nRead Slave data, len: %d, contents:\n", oLength);
-			for (i = 0; i < oLength; i++) {
-				printf("%02x ", oBuffer[i]);
-				if (((i + 1) % 20) == 0)
-					putchar(20);
-			}
-			putchar(20);
-		}
-	} else
-		ret = CH347SPI_Slave_Control(ch347device.fd, false);
-
-	return;
-
-exit:
-	CH347SPI_Slave_Control(ch347device.fd, false);
-}
-
 static void ch34x_demo_gpio_input_operate()
 {
 	bool ret;
@@ -621,7 +612,8 @@ static void ch34x_demo_gpio_output_operate()
 	printf("\n********** GPIO Output Start **********\n");
 	for (i = 0; i < gpiocount; i++) {
 		iSetDataOut = 1 << i;
-		ret = CH347GPIO_Set(ch347device.fd, iEnable, iSetDirOut, iSetDataOut);
+		ret = CH347GPIO_Set(ch347device.fd, iEnable, iSetDirOut,
+				    iSetDataOut);
 		if (ret == false) {
 			printf("CH347GPIO_Set error.\n");
 			return;
@@ -653,7 +645,9 @@ static void ch34x_demo_irq_operate(bool enable)
 	bool ret;
 	int gpioindex = 6;
 
-	ret = CH347GPIO_IRQ_Set(ch347device.fd, gpioindex, enable, IRQ_TYPE_EDGE_BOTH, ch34x_demo_isr_handler);
+	ret = CH347GPIO_IRQ_Set(ch347device.fd, gpioindex, enable,
+				IRQ_TYPE_EDGE_BOTH,
+				ch34x_demo_isr_handler);
 	if (!ret) {
 		printf("Failed to set CH347 irq function.");
 		return;
@@ -672,7 +666,7 @@ void ch34x_demo_uart_operate()
 	for (i = 0; i < 256; i++)
 		iBuffer[i] = i;
 
-	ret = CH347Uart_Init(ch347device.fd, 115200, 3, 0, 0, 1);
+	ret = CH347Uart_Init(ch347device.fd, 115200, 8, 0, 0, 1);
 	if (!ret) {
 		printf("Failed to init CH347 UART interface.\n");
 		return;
@@ -779,7 +773,8 @@ bool Show_DevMsg(char *pathname)
 		}
 	} else if (strstr(pathname, "ch34x_pis")) {
 		/* Get Driver Version */
-		ret = CH34x_GetDriverVersion(ch347device.fd, ch347device.version);
+		ret = CH34x_GetDriverVersion(ch347device.fd,
+					     ch347device.version);
 		if (ret == false) {
 			printf("CH34x_GetDriverVersion error.\n");
 			goto exit;
@@ -787,7 +782,8 @@ bool Show_DevMsg(char *pathname)
 		printf("Driver version: %s\n", ch347device.version);
 
 		/* Get Chip Type */
-		ret = CH34x_GetChipType(ch347device.fd, &ch347device.chiptype);
+		ret = CH34x_GetChipType(ch347device.fd,
+					&ch347device.chiptype);
 		if (ret == false) {
 			printf("CH34x_GetChipType error.\n");
 			goto exit;
@@ -798,21 +794,23 @@ bool Show_DevMsg(char *pathname)
 		}
 
 		/* Get Device ID */
-		ret = CH34X_GetDeviceID(ch347device.fd, &ch347device.dev_id);
+		ret = CH34X_GetDeviceID(ch347device.fd,
+					&ch347device.dev_id);
 		if (ret == false) {
 			printf("CH34X_GetDeviceID error.\n");
 			goto exit;
 		}
 		vendor = ch347device.dev_id;
 		product = ch347device.dev_id >> 16;
-		printf("Vendor ID: 0x%4x, Product ID: 0x%4x\n", vendor, product);
+		printf("Vendor ID: 0x%4x, Product ID: 0x%4x\n", vendor,
+		       product);
 		if (product == 0x55db) {
 			ch347device.functype = FUNC_SPI_I2C_GPIO;
 			printf("Device operating has function [SPI+I2C+GPIO].\n");
 		} else if (product == 0x55dd) {
 			ch347device.functype = FUNC_JTAG_GPIO;
 			printf("Device operating has function [JTAG+GPIO].\n");
-		} else if (product == 0x55de) {
+		} else if (product == 0x55de || product == 0x55e7) {
 			ch347device.functype = FUNC_SPI_I2C_JTAG_GPIO;
 			printf("Device operating has function [SPI+I2C+JTAG+GPIO].\n");
 		}
@@ -839,7 +837,8 @@ int main(int argc, char *argv[])
 		printf("CH347OpenDevice false.\n");
 		return -1;
 	}
-	printf("Open device %s succeed, fd: %d\n", argv[1], ch347device.fd);
+	printf("Open device %s succeed, fd: %d\n", argv[1],
+	       ch347device.fd);
 
 	ret = Show_DevMsg(argv[1]);
 	if (ret == false)
@@ -877,7 +876,6 @@ int main(int argc, char *argv[])
 		while (1) {
 			printf("\npress f to operate spi flash, e to operate eeprom,\n"
 			       "a to get gpio status, g to gpio output test, j to operate jtag interface,\n"
-			       "s to enable spi slave mode, o to disable spi slave mode,\n"
 			       "i to enable interrupt, d to disable interrupt, q to quit.\n");
 
 			scanf("%c", &choice);
@@ -912,25 +910,10 @@ int main(int argc, char *argv[])
 				ch34x_demo_irq_operate(false);
 				break;
 			case 'j':
-				if (ch347device.functype == FUNC_SPI_I2C_JTAG_GPIO) {
+				if (ch347device.functype ==
+				    FUNC_SPI_I2C_JTAG_GPIO) {
 					printf("JTAG Test begin.\n");
 					ch34x_demo_jtag_operate();
-				} else {
-					printf("Chip is not CH347F.\n");
-				}
-				break;
-			case 's':
-				if (ch347device.chiptype == CHIP_CH347F) {
-					printf("SPI Slave Test Begin.\n");
-					ch34x_demo_spi_slave_operate(true);
-				} else {
-					printf("Chip is not CH347F.\n");
-				}
-				break;
-			case 'o':
-				if (ch347device.chiptype == CHIP_CH347F) {
-					printf("SPI Slave Test Over.\n");
-					ch34x_demo_spi_slave_operate(false);
 				} else {
 					printf("Chip is not CH347F.\n");
 				}
@@ -962,7 +945,7 @@ int main(int argc, char *argv[])
 				ch34x_demo_gpio_input_operate();
 				break;
 			case 'g':
-				printf("GPIO Test begin.\n");
+				printf("GPIO Output Test begin.\n");
 				ch34x_demo_gpio_output_operate();
 			default:
 				printf("Bad choice, please input again.\n");

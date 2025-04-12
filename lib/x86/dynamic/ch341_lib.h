@@ -1,6 +1,7 @@
 #ifndef _CH341_LIB_H
 #define _CH341_LIB_H
 
+#ifndef ENUM_EEPROM_TYPE
 typedef enum _EEPROM_TYPE {
 	ID_24C01,
 	ID_24C02,
@@ -16,19 +17,28 @@ typedef enum _EEPROM_TYPE {
 	ID_24C2048,
 	ID_24C4096
 } EEPROM_TYPE;
+#define ENUM_EEPROM_TYPE
+#endif
 
+#ifndef ENUM_CHIP_TYPE
 typedef enum _CHIP_TYPE {
 	CHIP_CH341 = 0,
 	CHIP_CH347T = 1,
 	CHIP_CH347F = 2,
 	CHIP_CH339W = 3,
+	CHIP_CH346C = 4,
 } CHIP_TYPE;
+#define ENUM_CHIP_TYPE
+#endif
 
+#ifndef ENUM_FUNCTYPE
 typedef enum {
 	TYPE_TTY = 0,
 	TYPE_HID,
 	TYPE_VCP,
 } FUNCTYPE;
+#define ENUM_FUNCTYPE
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -60,15 +70,6 @@ extern bool CH34xCloseDevice(int fd);
 extern bool CH34x_GetDriverVersion(int fd, unsigned char *Drv_Version);
 
 /**
- * CH34x_GetChipVersion - get chip version
- * @fd: file descriptor of device
- * @Version: pointer to version
- *
- * The function return true if successful, false if fail.
- */
-extern bool CH34x_GetChipVersion(int fd, unsigned char *Version);
-
-/**
  * CH34x_GetChipType - get chip type
  * @fd: file descriptor of device
  * @ChipType: pointer to chip type
@@ -78,9 +79,9 @@ extern bool CH34x_GetChipVersion(int fd, unsigned char *Version);
 extern bool CH34x_GetChipType(int fd, CHIP_TYPE *ChipType);
 
 /**
- * CH34X_GetDeviceID - get device vid and pid
+ * CH34X_GetDeviceID - get device VID and PID
  * @fd: file descriptor of device
- * @id: pointer to store id which contains vid and pid
+ * @id: pointer to store id which contains VID and PID
  *
  * The function return true if successful, false if fail.
  */
@@ -266,21 +267,6 @@ extern bool CH34xReadData(int fd, void *oReadBuffer, uint32_t *oReadLength);
 extern bool CH34xWriteData(int fd, void *iWriteBuffer, uint32_t *iWriteLength);
 
 /**
- * CH34xWriteRead - write data then read for spi/i2c operation
- * @fd: file descriptor of device
- * @iWriteLength: write length
- * @iWriteBuffer: pointer to write buffer
- * @iReadStep: per read length
- * @iReadTimes: read times
- * @oReadLength: pointer to read length
- * @oReadBuffer: pointer to read buffer
- *
- * The function return true if successful, false if fail.
- */
-extern bool CH34xWriteRead(int fd, uint32_t iWriteLength, void *iWriteBuffer, uint32_t iReadStep, uint32_t iReadTimes,
-			   uint32_t *oReadLength, void *oReadBuffer);
-
-/**
  * CH34xGetInput - get io status of CH341
  * @fd: file descriptor of device
  * @iStatus: pointer to io status
@@ -371,18 +357,6 @@ extern bool CH34xReadEEPROM(int fd, EEPROM_TYPE iEepromID, uint32_t iAddr, uint3
 extern bool CH34xWriteEEPROM(int fd, EEPROM_TYPE iEepromID, uint32_t iAddr, uint32_t iLength, uint8_t *iBuffer);
 
 /**
- * CH34xStreamSPIx - write/read spi in stream mode
- * @fd: file descriptor of device
- * @iChipSelect: cs enable
- * @iLength: the length of data
- * @ioBuffer: one in one out buffer
- * @ioBuffer2: two in two out buffer
- *
- * The function return true if successful, false if fail.
- */
-extern bool CH34xStreamSPIx(int fd, uint32_t iChipSelect, uint32_t iLength, void *ioBuffer, void *ioBuffer2);
-
-/**
  * CH34xStreamSPI4 - write/read spi in 4-line stream mode
  * @fd: file descriptor of device
  * @iChipSelect: cs enable
@@ -392,6 +366,18 @@ extern bool CH34xStreamSPIx(int fd, uint32_t iChipSelect, uint32_t iLength, void
  * The function return true if successful, false if fail.
  */
 extern bool CH34xStreamSPI4(int fd, uint32_t iChipSelect, uint32_t iLength, void *ioBuffer);
+
+/**
+ * CH34xStreamSPI5 - write/read spi in 5-line stream mode
+ * @fd: file descriptor of device
+ * @iChipSelect: cs enable, bit7: 0->ignore cs, 1->cs valid, bit[1:0]: 00/01/10 select D0/D1/D2 as active chip select
+ * @iLength: the length of data
+ * @ioBuffer: first buffer of two in two out buffer, write from DOUT, read from DIN
+ * @ioBuffer2: second buffer of two in two out buffer, write from DOUT2, read from DIN2
+ *
+ * The function return true if successful, false if fail.
+ */
+extern bool CH34xStreamSPI5(int fd, uint32_t iChipSelect, uint32_t iLength, void *ioBuffer, void *ioBuffer2);
 
 #ifdef __cplusplus
 }
