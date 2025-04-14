@@ -1,7 +1,7 @@
 /*
  * CH341/CH347 USB to multiple interfaces driver
  *
- * Copyright (C) 2023 Nanjing Qinheng Microelectronics Co., Ltd.
+ * Copyright (C) 2025 Nanjing Qinheng Microelectronics Co., Ltd.
  * Web:      http://wch.cn
  * Author:   WCH <tech@wch.cn>
  *
@@ -18,6 +18,7 @@
  * V1.4 - add support of gpio interrupt function, spi slave mode, etc.
  *      - add support of ch347f
  * V1.5 - add support of ch339w
+ *		- add support of ch346c
  */
 
 #define DEBUG
@@ -40,21 +41,23 @@
 #include <linux/kfifo.h>
 
 #define DRIVER_AUTHOR "WCH"
-#define DRIVER_DESC   "USB to multiple interface driver for ch341/ch347, etc."
-#define VERSION_DESC  "V1.5 On 2024.06"
+#define DRIVER_DESC \
+	"USB to multiple interface driver for ch341/ch347/ch339/ch346, etc."
+#define VERSION_DESC "V1.5 On 2024.12"
 
-#define CH34x_MINOR_BASE    200
+#define CH34x_MINOR_BASE 200
 #define CH341_PACKET_LENGTH 32
 #define CH347_PACKET_LENGTH 512
-#define MAX_BUFFER_LENGTH   0x1000
-#define MAX_TRANSFER	    1024
-#define CH347_KFIFO_LENGTH  64 * 1024
+#define MAX_BUFFER_LENGTH 0x1000
+#define MAX_SLAVE_LENGTH 0x100000
+#define MAX_TRANSFER 1024
+#define CH346_KFIFO_LENGTH KMALLOC_MAX_SIZE
 
 #define VENDOR_WRITE_TYPE 0x40
-#define VENDOR_READ_TYPE  0XC0
+#define VENDOR_READ_TYPE 0XC0
 
 #define CH34x_PARA_INIT 0xB1
-#define VENDOR_VERSION	0x5F
+#define VENDOR_VERSION 0x5F
 
 #define CH34x_PARA_CMD_R0 0xAC /* read data0 from parport */
 #define CH34x_PARA_CMD_R1 0xAD /* read data1 from parport */
@@ -64,32 +67,38 @@
 #define CH34x_EPP_IO_MAX (CH341_PACKET_LENGTH - 1)
 #define CH341_EPP_IO_MAX 0xFF
 
-#define CH34x_DEBUG_READ      0x95
-#define CH34x_DEBUG_WRITE     0x9A
+#define CH34x_DEBUG_READ 0x95
+#define CH34x_DEBUG_WRITE 0x9A
 #define USB20_CMD_SPI_BLCK_RD 0xC3
+#define CH34x_CMD_MODE 0xC2
+#define USB20_CMD_SLAVE_INIT 0xC5
 
 /* ioctl commands for interaction between driver and application */
 #define IOCTL_MAGIC 'W'
 
-#define CH34x_GET_DRV_VERSION	    _IOR(IOCTL_MAGIC, 0x80, u16)
-#define CH34x_CHIP_VERSION	    _IOR(IOCTL_MAGIC, 0x81, u16)
-#define CH34x_CHIP_TYPE		    _IOR(IOCTL_MAGIC, 0x82, u16)
-#define CH34x_CHIP_ID		    _IOR(IOCTL_MAGIC, 0x83, u16)
+#define CH34x_GET_DRV_VERSION _IOR(IOCTL_MAGIC, 0x80, u16)
+#define CH34x_CHIP_VERSION _IOR(IOCTL_MAGIC, 0x81, u16)
+#define CH34x_CHIP_TYPE _IOR(IOCTL_MAGIC, 0x82, u16)
+#define CH34x_CHIP_ID _IOR(IOCTL_MAGIC, 0x83, u16)
 #define CH34x_FUNCTION_SETPARA_MODE _IOW(IOCTL_MAGIC, 0x90, u16)
-#define CH34x_FUNCTION_READ_MODE    _IOW(IOCTL_MAGIC, 0x91, u16)
-#define CH34x_FUNCTION_WRITE_MODE   _IOW(IOCTL_MAGIC, 0x92, u16)
-#define CH34x_SET_TIMEOUT	    _IOW(IOCTL_MAGIC, 0x93, u16)
-#define CH34x_PIPE_DATA_READ	    _IOWR(IOCTL_MAGIC, 0xb0, u16)
-#define CH34x_PIPE_DATA_WRITE	    _IOWR(IOCTL_MAGIC, 0xb1, u16)
-#define CH34x_PIPE_WRITE_READ	    _IOWR(IOCTL_MAGIC, 0xb2, u16)
-#define CH34x_PIPE_DEVICE_CTRL	    _IOW(IOCTL_MAGIC, 0xb3, u16)
+#define CH34x_FUNCTION_READ_MODE _IOW(IOCTL_MAGIC, 0x91, u16)
+#define CH34x_FUNCTION_WRITE_MODE _IOW(IOCTL_MAGIC, 0x92, u16)
+#define CH34x_SET_TIMEOUT _IOW(IOCTL_MAGIC, 0x93, u16)
+#define CH34x_SET_MODE _IOW(IOCTL_MAGIC, 0x94, u16)
+
+#define CH34x_PIPE_DATA_READ _IOWR(IOCTL_MAGIC, 0xb0, u16)
+#define CH34x_PIPE_DATA_WRITE _IOWR(IOCTL_MAGIC, 0xb1, u16)
+#define CH34x_PIPE_WRITE_READ _IOWR(IOCTL_MAGIC, 0xb2, u16)
+#define CH34x_PIPE_DEVICE_CTRL _IOW(IOCTL_MAGIC, 0xb3, u16)
 #define CH34x_START_BUFFERED_UPLOAD _IOW(IOCTL_MAGIC, 0xb4, u16)
-#define CH34x_STOP_BUFFERED_UPLOAD  _IOW(IOCTL_MAGIC, 0xb5, u16)
-#define CH34x_QWERY_SPISLAVE_FIFO   _IOR(IOCTL_MAGIC, 0xb6, u16)
-#define CH34x_RESET_SPISLAVE_FIFO   _IOW(IOCTL_MAGIC, 0xb7, u16)
-#define CH34x_READ_SPISLAVE_FIFO    _IOR(IOCTL_MAGIC, 0xb8, u16)
-#define CH34x_START_IRQ_TASK	    _IOW(IOCTL_MAGIC, 0xc0, u16)
-#define CH34x_STOP_IRQ_TASK	    _IOW(IOCTL_MAGIC, 0xc1, u16)
+#define CH34x_STOP_BUFFERED_UPLOAD _IOW(IOCTL_MAGIC, 0xb5, u16)
+#define CH34x_QWERY_SLAVE_FIFO _IOR(IOCTL_MAGIC, 0xb6, u16)
+#define CH34x_RESET_SLAVE_FIFO _IOW(IOCTL_MAGIC, 0xb7, u16)
+#define CH34x_READ_SLAVE_FIFO _IOR(IOCTL_MAGIC, 0xb8, u16)
+#define CH34x_INIT_SLAVE _IOW(IOCTL_MAGIC, 0xb9, u16)
+
+#define CH34x_START_IRQ_TASK _IOW(IOCTL_MAGIC, 0xc0, u16)
+#define CH34x_STOP_IRQ_TASK _IOW(IOCTL_MAGIC, 0xc1, u16)
 
 #define DEFAULT_TIMEOUT 1000
 
@@ -98,20 +107,24 @@
 /* table of devices that work with this driver */
 static const struct usb_device_id ch34x_usb_ids[] = {
 	{ USB_DEVICE(0x1a86, 0x5512) },
-	{ USB_DEVICE_INTERFACE_NUMBER(0x1a86, 0x55db, 0x02) }, /* CH347T Mode1 SPI+IIC+UART */
-	{ USB_DEVICE_INTERFACE_NUMBER(0x1a86, 0x55dd, 0x02) }, /* CH347T Mode3 JTAG+UART */
+	{ USB_DEVICE_INTERFACE_NUMBER(
+		0x1a86, 0x55db, 0x02) }, /* CH347T Mode1 SPI+IIC+UART */
+	{ USB_DEVICE_INTERFACE_NUMBER(0x1a86, 0x55dd,
+				      0x02) }, /* CH347T Mode3 JTAG+UART */
 	{ USB_DEVICE_INTERFACE_NUMBER(0x1a86, 0x55de, 0x04) }, /* CH347F */
 	{ USB_DEVICE_INTERFACE_NUMBER(0x1a86, 0x55e7, 0x02) }, /* CH339W */
-	{}						       /* Terminating entry */
+	{ USB_DEVICE_INTERFACE_NUMBER(0x1a86, 0x55eb, 0x02) }, /* CH346C */
+	{} /* Terminating entry */
 };
 
 MODULE_DEVICE_TABLE(usb, ch34x_usb_ids);
 
 typedef enum _CHIP_TYPE {
 	CHIP_CH341 = 0,
-	CHIP_CH347T = 1,
-	CHIP_CH347F = 2,
-	CHIP_CH339W = 3,
+	CHIP_CH347T,
+	CHIP_CH347F,
+	CHIP_CH339W,
+	CHIP_CH346C,
 } CHIP_TYPE;
 
 #define WRITES_IN_FLIGHT 8
@@ -128,23 +141,25 @@ struct ch34x_rb {
 };
 
 struct ch34x_pis {
-	struct usb_device *udev;	 /*the usb device for this device*/
+	struct usb_device *udev; /*the usb device for this device*/
 	struct usb_interface *interface; /*the interface for this device*/
 	struct usb_endpoint_descriptor *interrupt_in_endpoint;
 	u16 ch34x_id[2]; /* device vid and pid */
 
-	struct semaphore limit_sem;  /* limiting the number of writes in progress */
-	struct usb_anchor submitted; /* in case we need to retract our submissions */
+	struct semaphore
+		limit_sem; /* limiting the number of writes in progress */
+	struct usb_anchor
+		submitted; /* in case we need to retract our submissions */
 
-	size_t interrupt_in_size;	    /*the size of rec data (interrupt)*/
-	unsigned char *interrupt_in_buffer; /*the buffer of rec data (interface)*/
+	size_t interrupt_in_size; /*the size of rec data (interrupt)*/
+	unsigned char *
+		interrupt_in_buffer; /*the buffer of rec data (interface)*/
 	struct urb *interrupt_in_urb;
 
-	size_t bulk_in_size;	       /*the size of rec data (bulk)*/
 	unsigned char *bulk_in_buffer; /*the buffer of rec data (bulk)*/
-	struct urb *read_urb;	       /*the urb of bulk_in*/
-	u8 bulk_in_endpointAddr;       /*bulk input endpoint*/
-	u8 bulk_out_endpointAddr;      /*bulk output endpoint*/
+	struct urb *read_urb; /*the urb of bulk_in*/
+	u8 bulk_in_endpointAddr; /*bulk input endpoint*/
+	u8 bulk_out_endpointAddr; /*bulk output endpoint*/
 	unsigned char *bulk_out_buffer;
 
 	int readsize;
@@ -170,6 +185,7 @@ struct ch34x_pis {
 	struct mutex io_mutex; /* synchronize I/O with disconnect */
 	CHIP_TYPE chiptype;
 	u16 chipver;
+	u8 chipmode;
 	int errors;
 	spinlock_t err_lock;
 	struct kref kref;
@@ -180,29 +196,36 @@ struct ch34x_pis {
 static struct usb_driver ch34x_pis_driver;
 static void ch34x_delete(struct kref *kref);
 static void stop_data_traffic(struct ch34x_pis *ch34x_dev);
-static int ch34x_submit_read_urbs(struct ch34x_pis *ch34x_dev, gfp_t mem_flags);
+static int ch34x_submit_read_urbs(struct ch34x_pis *ch34x_dev,
+				  gfp_t mem_flags);
 static void ch34x_usb_free_device(struct ch34x_pis *ch34x_dev);
 
 /* USB control transfer in */
-static int ch34x_control_transfer_in(u8 request, u16 value, u16 index, struct ch34x_pis *ch34x_dev, unsigned char *buf,
-				     u16 len)
+static int ch34x_control_transfer_in(u8 request, u16 value, u16 index,
+				     struct ch34x_pis *ch34x_dev,
+				     unsigned char *buf, u16 len)
 {
 	int retval;
 
-	retval = usb_control_msg(ch34x_dev->udev, usb_rcvctrlpipe(ch34x_dev->udev, 0), request, VENDOR_READ_TYPE, value,
-				 index, buf, len, ch34x_dev->readtimeout);
+	retval = usb_control_msg(ch34x_dev->udev,
+				 usb_rcvctrlpipe(ch34x_dev->udev, 0),
+				 request, VENDOR_READ_TYPE, value, index,
+				 buf, len, ch34x_dev->readtimeout);
 
 	return retval;
 }
 
 /* USB control transfer out */
-static int ch34x_control_transfer_out(u8 request, u16 value, u16 index, struct ch34x_pis *ch34x_dev, unsigned char *buf,
-				      u16 len)
+static int ch34x_control_transfer_out(u8 request, u16 value, u16 index,
+				      struct ch34x_pis *ch34x_dev,
+				      unsigned char *buf, u16 len)
 {
 	int retval;
 
-	retval = usb_control_msg(ch34x_dev->udev, usb_sndctrlpipe(ch34x_dev->udev, 0), request, VENDOR_WRITE_TYPE,
-				 value, index, buf, len, ch34x_dev->writetimeout);
+	retval = usb_control_msg(ch34x_dev->udev,
+				 usb_sndctrlpipe(ch34x_dev->udev, 0),
+				 request, VENDOR_WRITE_TYPE, value, index,
+				 buf, len, ch34x_dev->writetimeout);
 
 	return retval;
 }
@@ -211,7 +234,8 @@ static int ch34x_control_transfer_out(u8 request, u16 value, u16 index, struct c
  * Initial operation for parallel port working mode.
  * @mode: 0x00/0x01->EPP mode, 0x02->MEM mode
  */
-static int ch34x_parallel_init(unsigned char mode, struct ch34x_pis *ch34x_dev)
+static int ch34x_parallel_init(unsigned char mode,
+			       struct ch34x_pis *ch34x_dev)
 {
 	int retval;
 	u8 requesttype = VENDOR_WRITE_TYPE;
@@ -219,8 +243,10 @@ static int ch34x_parallel_init(unsigned char mode, struct ch34x_pis *ch34x_dev)
 	u16 value = (mode << 8) | (mode < 0x00000100 ? 0x02 : 0x00);
 	u16 index = 0;
 	u16 len = 0;
-	retval = usb_control_msg(ch34x_dev->udev, usb_sndctrlpipe(ch34x_dev->udev, 0), request, requesttype, value,
-				 index, NULL, len, ch34x_dev->writetimeout);
+	retval = usb_control_msg(ch34x_dev->udev,
+				 usb_sndctrlpipe(ch34x_dev->udev, 0),
+				 request, requesttype, value, index, NULL,
+				 len, ch34x_dev->writetimeout);
 
 	return retval;
 }
@@ -228,7 +254,8 @@ static int ch34x_parallel_init(unsigned char mode, struct ch34x_pis *ch34x_dev)
 /*
  * Read operation for parallel port read in EPP/MEM mode.
  */
-ssize_t ch34x_fops_read(struct file *file, char __user *to_user, size_t count, loff_t *file_pos)
+static ssize_t ch34x_fops_read(struct file *file, char __user *to_user,
+			       size_t count, loff_t *file_pos)
 {
 	struct ch34x_pis *ch34x_dev;
 	unsigned char buffer[4], *ibuf;
@@ -245,9 +272,11 @@ ssize_t ch34x_fops_read(struct file *file, char __user *to_user, size_t count, l
 	if (count == 0 || count > MAX_BUFFER_LENGTH) {
 		return -EINVAL;
 	}
-	bytes_per_read = (ch34x_dev->chipver >= 0x20) ?
-				 (CH341_EPP_IO_MAX - (CH341_EPP_IO_MAX & (CH341_PACKET_LENGTH - 1))) :
-				 CH34x_EPP_IO_MAX;
+	bytes_per_read =
+		(ch34x_dev->chipver >= 0x20) ?
+			(CH341_EPP_IO_MAX -
+			 (CH341_EPP_IO_MAX & (CH341_PACKET_LENGTH - 1))) :
+			CH34x_EPP_IO_MAX;
 
 	times = count / bytes_per_read;
 	ibuf[0] = buffer[0] = buffer[2] = ch34x_dev->para_rmode;
@@ -274,29 +303,37 @@ ssize_t ch34x_fops_read(struct file *file, char __user *to_user, size_t count, l
 			bytes_to_read = bytes_per_read;
 		}
 
-		ch34x_dev->bulk_in_buffer = kmalloc(sizeof(unsigned char) * bytes_to_read, GFP_KERNEL);
+		ch34x_dev->bulk_in_buffer = kmalloc(
+			sizeof(unsigned char) * bytes_to_read, GFP_KERNEL);
 		if (ch34x_dev->bulk_in_buffer == NULL) {
 			retval = -ENOMEM;
 			goto exit;
 		}
 
 		mutex_lock(&ch34x_dev->io_mutex);
-		retval = usb_bulk_msg(ch34x_dev->udev,
-				      usb_sndbulkpipe(ch34x_dev->udev, ch34x_dev->bulk_out_endpointAddr), ibuf, 0x02,
-				      NULL, ch34x_dev->writetimeout);
+		retval = usb_bulk_msg(
+			ch34x_dev->udev,
+			usb_sndbulkpipe(ch34x_dev->udev,
+					ch34x_dev->bulk_out_endpointAddr),
+			ibuf, 0x02, NULL, ch34x_dev->writetimeout);
 		if (retval) {
 			mutex_unlock(&ch34x_dev->io_mutex);
 			goto exit1;
 		}
-		retval = usb_bulk_msg(ch34x_dev->udev,
-				      usb_rcvbulkpipe(ch34x_dev->udev, ch34x_dev->bulk_in_endpointAddr),
-				      ch34x_dev->bulk_in_buffer, bytes_to_read, &actual_len, ch34x_dev->readtimeout);
+		retval = usb_bulk_msg(
+			ch34x_dev->udev,
+			usb_rcvbulkpipe(ch34x_dev->udev,
+					ch34x_dev->bulk_in_endpointAddr),
+			ch34x_dev->bulk_in_buffer, bytes_to_read,
+			&actual_len, ch34x_dev->readtimeout);
 		if (retval) {
 			mutex_unlock(&ch34x_dev->io_mutex);
 			goto exit1;
 		}
 		mutex_unlock(&ch34x_dev->io_mutex);
-		retval = copy_to_user(to_user + totallen, ch34x_dev->bulk_in_buffer, actual_len);
+		retval = copy_to_user(to_user + totallen,
+				      ch34x_dev->bulk_in_buffer,
+				      actual_len);
 		if (retval)
 			goto exit1;
 		totallen += actual_len;
@@ -318,9 +355,12 @@ static void ch34x_write_bulk_callback(struct urb *urb)
 
 	/* sync/async unlink faults aren't errors */
 	if (urb->status) {
-		if (!(urb->status == -ENOENT || urb->status == -ECONNRESET || urb->status == -ESHUTDOWN))
-			dev_err(&ch34x_dev->interface->dev, "%s - nonzero write bulk status received: %d\n", __func__,
-				urb->status);
+		if (!(urb->status == -ENOENT ||
+		      urb->status == -ECONNRESET ||
+		      urb->status == -ESHUTDOWN))
+			dev_err(&ch34x_dev->interface->dev,
+				"%s - nonzero write bulk status received: %d\n",
+				__func__, urb->status);
 
 		spin_lock(&ch34x_dev->err_lock);
 		ch34x_dev->errors = urb->status;
@@ -328,14 +368,17 @@ static void ch34x_write_bulk_callback(struct urb *urb)
 	}
 
 	/* free up our allocated buffer */
-	usb_free_coherent(urb->dev, urb->transfer_buffer_length, urb->transfer_buffer, urb->transfer_dma);
+	usb_free_coherent(urb->dev, urb->transfer_buffer_length,
+			  urb->transfer_buffer, urb->transfer_dma);
 	up(&ch34x_dev->limit_sem);
 }
 
 /*
  * Write operation for parallel port read in EPP/MEM mode.
  */
-ssize_t ch34x_fops_write(struct file *file, const char __user *user_buffer, size_t count, loff_t *file_pos)
+static ssize_t ch34x_fops_write(struct file *file,
+				const char __user *user_buffer,
+				size_t count, loff_t *file_pos)
 {
 	struct ch34x_pis *ch34x_dev;
 	int retval = 0;
@@ -382,7 +425,8 @@ ssize_t ch34x_fops_write(struct file *file, const char __user *user_buffer, size
 		goto error;
 	}
 
-	buf = (char *)kmalloc(sizeof(unsigned char) * MAX_BUFFER_LENGTH, GFP_KERNEL);
+	buf = (char *)kmalloc(sizeof(unsigned char) * MAX_BUFFER_LENGTH,
+			      GFP_KERNEL);
 	if (!buf) {
 		retval = -ENOMEM;
 		goto error;
@@ -390,7 +434,9 @@ ssize_t ch34x_fops_write(struct file *file, const char __user *user_buffer, size
 
 	for (i = 0; i < mnewlen; i += CH341_PACKET_LENGTH) {
 		buf[i] = ch34x_dev->para_wmode;
-		retval = copy_from_user(buf + i + 1, user_buffer + totallen, CH34x_EPP_IO_MAX);
+		retval = copy_from_user(buf + i + 1,
+					user_buffer + totallen,
+					CH34x_EPP_IO_MAX);
 		if (retval) {
 			goto error;
 		}
@@ -398,14 +444,16 @@ ssize_t ch34x_fops_write(struct file *file, const char __user *user_buffer, size
 	}
 	if (mlen) {
 		buf[i] = ch34x_dev->para_wmode;
-		retval = copy_from_user(buf + i + 1, user_buffer + totallen, mlen);
+		retval = copy_from_user(buf + i + 1,
+					user_buffer + totallen, mlen);
 		if (retval) {
 			goto error;
 		}
 		mnewlen += mlen + 1;
 	}
 
-	ibuf = usb_alloc_coherent(ch34x_dev->udev, mnewlen, GFP_KERNEL, &urb->transfer_dma);
+	ibuf = usb_alloc_coherent(ch34x_dev->udev, mnewlen, GFP_KERNEL,
+				  &urb->transfer_dma);
 	if (!ibuf) {
 		retval = -ENOMEM;
 		goto error;
@@ -421,8 +469,11 @@ ssize_t ch34x_fops_write(struct file *file, const char __user *user_buffer, size
 	}
 
 	/* initialize the urb properly */
-	usb_fill_bulk_urb(urb, ch34x_dev->udev, usb_sndbulkpipe(ch34x_dev->udev, ch34x_dev->bulk_out_endpointAddr),
-			  ibuf, mnewlen, ch34x_write_bulk_callback, ch34x_dev);
+	usb_fill_bulk_urb(
+		urb, ch34x_dev->udev,
+		usb_sndbulkpipe(ch34x_dev->udev,
+				ch34x_dev->bulk_out_endpointAddr),
+		ibuf, mnewlen, ch34x_write_bulk_callback, ch34x_dev);
 	urb->transfer_flags |= URB_NO_TRANSFER_DMA_MAP;
 	usb_anchor_urb(urb, &ch34x_dev->submitted);
 
@@ -430,7 +481,9 @@ ssize_t ch34x_fops_write(struct file *file, const char __user *user_buffer, size
 	retval = usb_submit_urb(urb, GFP_KERNEL);
 	mutex_unlock(&ch34x_dev->io_mutex);
 	if (retval) {
-		dev_err(&ch34x_dev->interface->dev, "%s - failed submitting write urb, error %d\n", __func__, retval);
+		dev_err(&ch34x_dev->interface->dev,
+			"%s - failed submitting write urb, error %d\n",
+			__func__, retval);
 		goto error_unanchor;
 	}
 
@@ -451,7 +504,8 @@ error:
 	if (buf)
 		kfree(buf);
 	if (urb) {
-		usb_free_coherent(ch34x_dev->udev, count, ibuf, urb->transfer_dma);
+		usb_free_coherent(ch34x_dev->udev, count, ibuf,
+				  urb->transfer_dma);
 		usb_free_urb(urb);
 	}
 	up(&ch34x_dev->limit_sem);
@@ -474,7 +528,9 @@ static int ch34x_flush(struct file *file, fl_owner_t id)
 
 	/* read out errors, leave subsequent opens a clean slate */
 	spin_lock_irq(&ch34x_dev->err_lock);
-	res = ch34x_dev->errors ? (ch34x_dev->errors == -EPIPE ? -EPIPE : -EIO) : 0;
+	res = ch34x_dev->errors ?
+		      (ch34x_dev->errors == -EPIPE ? -EPIPE : -EIO) :
+		      0;
 	ch34x_dev->errors = 0;
 	spin_unlock_irq(&ch34x_dev->err_lock);
 
@@ -486,7 +542,8 @@ static int ch34x_flush(struct file *file, fl_owner_t id)
 /*
  * Read operation for I2C/SPI interface.
  */
-static int ch34x_data_read(struct ch34x_pis *ch34x_dev, void *obuffer, u32 bytes_to_read)
+static int ch34x_data_read(struct ch34x_pis *ch34x_dev, void *obuffer,
+			   u32 bytes_to_read)
 {
 	int bytes_read;
 	unsigned char *obuf;
@@ -507,15 +564,19 @@ static int ch34x_data_read(struct ch34x_pis *ch34x_dev, void *obuffer, u32 bytes
 	if (retval < 0)
 		goto exit;
 
-	obuf = (char *)kmalloc(sizeof(unsigned char) * bytes_to_read, GFP_KERNEL);
+	obuf = (char *)kmalloc(sizeof(unsigned char) * bytes_to_read,
+			       GFP_KERNEL);
 	if (!obuf) {
 		retval = -ENOMEM;
 		goto error;
 	}
 
 	mutex_lock(&ch34x_dev->io_mutex);
-	retval = usb_bulk_msg(ch34x_dev->udev, usb_rcvbulkpipe(ch34x_dev->udev, ch34x_dev->bulk_in_endpointAddr), obuf,
-			      bytes_to_read, &bytes_read, ch34x_dev->readtimeout);
+	retval = usb_bulk_msg(
+		ch34x_dev->udev,
+		usb_rcvbulkpipe(ch34x_dev->udev,
+				ch34x_dev->bulk_in_endpointAddr),
+		obuf, bytes_to_read, &bytes_read, ch34x_dev->readtimeout);
 	if (retval) {
 		mutex_unlock(&ch34x_dev->io_mutex);
 		goto error;
@@ -534,9 +595,10 @@ exit:
 }
 
 /*
- * Write operation for I2C/SPI interface.
+ * Write operation for I2C/SPI/FIFO interface.
  */
-static int ch34x_data_write(struct ch34x_pis *ch34x_dev, void *ibuffer, u32 count)
+static int ch34x_data_write(struct ch34x_pis *ch34x_dev, void *ibuffer,
+			    u32 count)
 {
 	unsigned char *ibuf;
 	int retval = 0;
@@ -544,8 +606,11 @@ static int ch34x_data_write(struct ch34x_pis *ch34x_dev, void *ibuffer, u32 coun
 	u32 writesize;
 	u32 restlen = count;
 	u32 bytes_total = 0;
+	u32 maxlen = ch34x_dev->chiptype == CHIP_CH346C ?
+			     MAX_SLAVE_LENGTH :
+			     MAX_BUFFER_LENGTH;
 
-	if (count > MAX_BUFFER_LENGTH || count <= 0) {
+	if (count > maxlen || count <= 0) {
 		retval = -EINVAL;
 		goto exit;
 	}
@@ -570,7 +635,7 @@ static int ch34x_data_write(struct ch34x_pis *ch34x_dev, void *ibuffer, u32 coun
 		goto exit;
 
 send:
-	writesize = min_t(u32, restlen, MAX_TRANSFER);
+	writesize = min_t(u32, restlen, maxlen);
 
 	/* create a urb, and a buffer for it, and copy the data to the urb */
 	urb = usb_alloc_urb(0, GFP_KERNEL);
@@ -579,13 +644,15 @@ send:
 		goto error;
 	}
 
-	ibuf = usb_alloc_coherent(ch34x_dev->udev, writesize, GFP_KERNEL, &urb->transfer_dma);
+	ibuf = usb_alloc_coherent(ch34x_dev->udev, writesize, GFP_KERNEL,
+				  &urb->transfer_dma);
 	if (!ibuf) {
 		retval = -ENOMEM;
 		goto error;
 	}
 
-	retval = copy_from_user(ibuf, (char __user *)ibuffer + bytes_total, writesize);
+	retval = copy_from_user(ibuf, (char __user *)ibuffer + bytes_total,
+				writesize);
 	if (retval)
 		goto error;
 
@@ -597,8 +664,11 @@ send:
 	}
 
 	/* initialize the urb properly */
-	usb_fill_bulk_urb(urb, ch34x_dev->udev, usb_sndbulkpipe(ch34x_dev->udev, ch34x_dev->bulk_out_endpointAddr),
-			  ibuf, writesize, ch34x_write_bulk_callback, ch34x_dev);
+	usb_fill_bulk_urb(
+		urb, ch34x_dev->udev,
+		usb_sndbulkpipe(ch34x_dev->udev,
+				ch34x_dev->bulk_out_endpointAddr),
+		ibuf, writesize, ch34x_write_bulk_callback, ch34x_dev);
 	urb->transfer_flags |= URB_NO_TRANSFER_DMA_MAP;
 	usb_anchor_urb(urb, &ch34x_dev->submitted);
 
@@ -606,7 +676,9 @@ send:
 	retval = usb_submit_urb(urb, GFP_KERNEL);
 	mutex_unlock(&ch34x_dev->io_mutex);
 	if (retval) {
-		dev_err(&ch34x_dev->interface->dev, "%s - failed submitting write urb, error %d\n", __func__, retval);
+		dev_err(&ch34x_dev->interface->dev,
+			"%s - failed submitting write urb, error %d\n",
+			__func__, retval);
 		goto error_unanchor;
 	}
 
@@ -627,7 +699,8 @@ error_unanchor:
 	usb_unanchor_urb(urb);
 error:
 	if (urb) {
-		usb_free_coherent(ch34x_dev->udev, count, ibuf, urb->transfer_dma);
+		usb_free_coherent(ch34x_dev->udev, count, ibuf,
+				  urb->transfer_dma);
 		usb_free_urb(urb);
 	}
 	up(&ch34x_dev->limit_sem);
@@ -638,8 +711,9 @@ exit:
 /*
  * Write then Read operation for I2C/SPI interface.
  */
-static int ch34x_data_write_read(struct ch34x_pis *ch34x_dev, void *ibuffer, void *obuffer, u32 readstep, u32 readtime,
-				 u32 count)
+static int ch34x_data_write_read(struct ch34x_pis *ch34x_dev,
+				 void *ibuffer, void *obuffer,
+				 u32 readstep, u32 readtime, u32 count)
 {
 	int bytes_read;
 	unsigned char *ibuf;
@@ -654,7 +728,8 @@ static int ch34x_data_write_read(struct ch34x_pis *ch34x_dev, void *ibuffer, voi
 	u32 bytes_total = 0;
 
 	bytes_to_read = readstep * readtime;
-	if (count > MAX_BUFFER_LENGTH || bytes_to_read > MAX_BUFFER_LENGTH) {
+	if (count > MAX_BUFFER_LENGTH ||
+	    bytes_to_read > MAX_BUFFER_LENGTH) {
 		retval = -EINVAL;
 		goto exit;
 	}
@@ -677,7 +752,8 @@ static int ch34x_data_write_read(struct ch34x_pis *ch34x_dev, void *ibuffer, voi
 	if (retval < 0)
 		goto exit;
 
-	obuf = (char *)kmalloc(sizeof(unsigned char) * bytes_to_read, GFP_KERNEL);
+	obuf = (char *)kmalloc(sizeof(unsigned char) * bytes_to_read,
+			       GFP_KERNEL);
 	if (!obuf) {
 		retval = -ENOMEM;
 		goto error;
@@ -693,13 +769,15 @@ send:
 		goto error;
 	}
 
-	ibuf = usb_alloc_coherent(ch34x_dev->udev, writesize, GFP_KERNEL, &urb->transfer_dma);
+	ibuf = usb_alloc_coherent(ch34x_dev->udev, writesize, GFP_KERNEL,
+				  &urb->transfer_dma);
 	if (!ibuf) {
 		retval = -ENOMEM;
 		goto error;
 	}
 
-	retval = copy_from_user(ibuf, (char __user *)ibuffer + bytes_total, writesize);
+	retval = copy_from_user(ibuf, (char __user *)ibuffer + bytes_total,
+				writesize);
 	if (retval)
 		goto error;
 
@@ -711,8 +789,11 @@ send:
 	}
 
 	/* initialize the urb properly */
-	usb_fill_bulk_urb(urb, ch34x_dev->udev, usb_sndbulkpipe(ch34x_dev->udev, ch34x_dev->bulk_out_endpointAddr),
-			  ibuf, writesize, ch34x_write_bulk_callback, ch34x_dev);
+	usb_fill_bulk_urb(
+		urb, ch34x_dev->udev,
+		usb_sndbulkpipe(ch34x_dev->udev,
+				ch34x_dev->bulk_out_endpointAddr),
+		ibuf, writesize, ch34x_write_bulk_callback, ch34x_dev);
 	urb->transfer_flags |= URB_NO_TRANSFER_DMA_MAP;
 	usb_anchor_urb(urb, &ch34x_dev->submitted);
 
@@ -722,7 +803,9 @@ send:
 	mutex_unlock(&ch34x_dev->io_mutex);
 
 	if (retval) {
-		dev_err(&ch34x_dev->interface->dev, "%s - failed submitting write urb, error %d\n", __func__, retval);
+		dev_err(&ch34x_dev->interface->dev,
+			"%s - failed submitting write urb, error %d\n",
+			__func__, retval);
 		goto error_unanchor;
 	}
 	/*
@@ -738,9 +821,12 @@ send:
 
 	for (i = 0; i < readtime; i++) {
 		mutex_lock(&ch34x_dev->io_mutex);
-		retval = usb_bulk_msg(ch34x_dev->udev,
-				      usb_rcvbulkpipe(ch34x_dev->udev, ch34x_dev->bulk_in_endpointAddr),
-				      obuf + totallen, CH341_PACKET_LENGTH, &bytes_read, ch34x_dev->readtimeout);
+		retval = usb_bulk_msg(
+			ch34x_dev->udev,
+			usb_rcvbulkpipe(ch34x_dev->udev,
+					ch34x_dev->bulk_in_endpointAddr),
+			obuf + totallen, CH341_PACKET_LENGTH, &bytes_read,
+			ch34x_dev->readtimeout);
 
 		if (retval) {
 			mutex_unlock(&ch34x_dev->io_mutex);
@@ -770,7 +856,8 @@ error:
 	if (obuf)
 		kfree(obuf);
 	if (urb) {
-		usb_free_coherent(ch34x_dev->udev, count, ibuf, urb->transfer_dma);
+		usb_free_coherent(ch34x_dev->udev, count, ibuf,
+				  urb->transfer_dma);
 		usb_free_urb(urb);
 	}
 	up(&ch34x_dev->limit_sem);
@@ -843,7 +930,8 @@ static void ch34x_reset_slave_fifo(struct ch34x_pis *ch34x_dev)
 	spin_unlock_irqrestore(&ch34x_dev->read_lock, flags);
 }
 
-static int ch34x_slave_fifo_read(struct ch34x_pis *ch34x_dev, void *obuffer, u32 bytes_to_read)
+static int ch34x_slave_fifo_read(struct ch34x_pis *ch34x_dev,
+				 void *obuffer, u32 bytes_to_read)
 {
 	int bytes_read;
 	unsigned char *obuf;
@@ -851,7 +939,7 @@ static int ch34x_slave_fifo_read(struct ch34x_pis *ch34x_dev, void *obuffer, u32
 	int fifolen;
 	unsigned long flags;
 
-	if ((bytes_to_read > CH347_KFIFO_LENGTH) || (bytes_to_read == 0)) {
+	if ((bytes_to_read > CH346_KFIFO_LENGTH) || (bytes_to_read == 0)) {
 		retval = -EINVAL;
 		goto exit;
 	}
@@ -871,16 +959,19 @@ static int ch34x_slave_fifo_read(struct ch34x_pis *ch34x_dev, void *obuffer, u32
 	spin_unlock_irqrestore(&ch34x_dev->read_lock, flags);
 
 	if (fifolen == 0) {
-		retval = wait_event_interruptible_timeout(ch34x_dev->wait,
-							  ch34x_dev->rx_flag || (ch34x_dev->interface == NULL),
-							  msecs_to_jiffies(DEFAULT_TIMEOUT));
+		retval = wait_event_interruptible_timeout(
+			ch34x_dev->wait,
+			ch34x_dev->rx_flag ||
+				(ch34x_dev->interface == NULL),
+			msecs_to_jiffies(ch34x_dev->readtimeout));
 		if (retval <= 0)
 			return retval;
 	}
 
 	bytes_read = bytes_to_read > fifolen ? fifolen : bytes_to_read;
 
-	obuf = (char *)kmalloc(sizeof(unsigned char) * bytes_to_read, GFP_KERNEL);
+	obuf = (char *)kmalloc(sizeof(unsigned char) * bytes_to_read,
+			       GFP_KERNEL);
 	if (!obuf) {
 		retval = -ENOMEM;
 		goto error;
@@ -975,6 +1066,9 @@ static int ch34x_fops_open(struct inode *inode, struct file *file)
 
 	file->private_data = ch34x_dev;
 
+	if (ch34x_dev->chiptype == CHIP_CH346C)
+		ch34x_reset_slave_fifo(ch34x_dev);
+
 exit:
 	return retval;
 }
@@ -1001,9 +1095,12 @@ static int ch34x_fops_release(struct inode *inode, struct file *file)
 }
 
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(2, 6, 35))
-static int ch34x_fops_ioctl(struct inode *inode, struct file *file, unsigned int ch34x_cmd, unsigned long ch34x_arg)
+static int ch34x_fops_ioctl(struct inode *inode, struct file *file,
+			    unsigned int ch34x_cmd,
+			    unsigned long ch34x_arg)
 #else
-static long ch34x_fops_ioctl(struct file *file, unsigned int ch34x_cmd, unsigned long ch34x_arg)
+static long ch34x_fops_ioctl(struct file *file, unsigned int ch34x_cmd,
+			     unsigned long ch34x_arg)
 #endif
 {
 	int retval = 0;
@@ -1031,28 +1128,42 @@ static long ch34x_fops_ioctl(struct file *file, unsigned int ch34x_cmd, unsigned
 
 	switch (ch34x_cmd) {
 	case CH34x_GET_DRV_VERSION:
-		retval = copy_to_user((char __user *)ch34x_arg, (char *)drv_version, strlen(VERSION_DESC));
+		retval = copy_to_user((char __user *)ch34x_arg,
+				      (char *)drv_version,
+				      strlen(VERSION_DESC));
 		break;
 	case CH34x_CHIP_VERSION:
-		retval = ch34x_control_transfer_in(VENDOR_VERSION, 0x0000, 0x0000, ch34x_dev, buf, 0x02);
-		if (retval != 0x02)
+		retval = ch34x_control_transfer_in(VENDOR_VERSION, 0x0000,
+						   0x0000, ch34x_dev, buf,
+						   0x08);
+		if (retval < 0)
 			break;
-		ch34x_dev->chipver = *(buf + 1) << 8 | *buf;
-		retval = put_user(*buf, (u8 __user *)ch34x_arg);
+		if (ch34x_dev->chiptype == CHIP_CH341) {
+			ch34x_dev->chipver = *(buf + 1) << 8 | *buf;
+			retval = put_user(*buf, (u8 __user *)ch34x_arg);
+		} else if (ch34x_dev->chiptype == CHIP_CH346C) {
+			ch34x_dev->chipmode = *(buf + 4) & 0x03;
+			retval = put_user(ch34x_dev->chipmode,
+					  (u8 __user *)ch34x_arg);
+		}
 		break;
 	case CH34x_CHIP_TYPE:
-		retval = put_user(ch34x_dev->chiptype, (u8 __user *)ch34x_arg);
+		retval = put_user(ch34x_dev->chiptype,
+				  (u8 __user *)ch34x_arg);
 		break;
 	case CH34x_CHIP_ID:
-		dev_id = ch34x_dev->ch34x_id[0] | (ch34x_dev->ch34x_id[1] << 16);
+		dev_id = ch34x_dev->ch34x_id[0] |
+			 (ch34x_dev->ch34x_id[1] << 16);
 		retval = put_user(dev_id, (u32 __user *)ch34x_arg);
 		break;
 	case CH34x_FUNCTION_SETPARA_MODE:
 		retval = get_user(mode, (u8 __user *)ch34x_arg);
 		if (retval)
 			goto exit;
-		retval = ch34x_control_transfer_out(CH34x_DEBUG_WRITE, 0x2525, (unsigned short)(mode << 8 | mode),
-						    ch34x_dev, NULL, 0x00);
+		retval = ch34x_control_transfer_out(
+			CH34x_DEBUG_WRITE, 0x2525,
+			(unsigned short)(mode << 8 | mode), ch34x_dev,
+			NULL, 0x00);
 		break;
 	case CH34x_FUNCTION_READ_MODE:
 		retval = get_user(mode, (u8 __user *)ch34x_arg);
@@ -1076,11 +1187,20 @@ static long ch34x_fops_ioctl(struct file *file, unsigned int ch34x_cmd, unsigned
 		retval = get_user(readtimeout, (u32 __user *)ch34x_arg);
 		if (retval)
 			goto exit;
-		retval = get_user(writetimeout, ((u32 __user *)ch34x_arg + 1));
+		retval = get_user(writetimeout,
+				  ((u32 __user *)ch34x_arg + 1));
 		if (retval)
 			goto exit;
 		ch34x_dev->readtimeout = readtimeout;
 		ch34x_dev->writetimeout = writetimeout;
+		break;
+	case CH34x_SET_MODE:
+		retval = get_user(mode, (u8 __user *)ch34x_arg);
+		if (retval)
+			goto exit;
+		retval = ch34x_control_transfer_out(
+			CH34x_CMD_MODE, (unsigned short)(mode << 8 | 0x01),
+			0x0000, ch34x_dev, NULL, 0x00);
 		break;
 	case CH34x_PIPE_DATA_READ:
 		if (ch34x_dev->buffered_mode) {
@@ -1091,7 +1211,8 @@ static long ch34x_fops_ioctl(struct file *file, unsigned int ch34x_cmd, unsigned
 		if (retval)
 			goto exit;
 		arg1 = (unsigned long)((u32 __user *)ch34x_arg + 1);
-		retval = ch34x_data_read(ch34x_dev, (void *)arg1, bytes_to_read);
+		retval = ch34x_data_read(ch34x_dev, (void *)arg1,
+					 bytes_to_read);
 		if (retval <= 0) {
 			retval = -EFAULT;
 			goto exit;
@@ -1103,7 +1224,13 @@ static long ch34x_fops_ioctl(struct file *file, unsigned int ch34x_cmd, unsigned
 		if (retval)
 			goto exit;
 		arg1 = (unsigned long)((u32 __user *)ch34x_arg + 1);
-		retval = ch34x_data_write(ch34x_dev, (void *)arg1, bytes_write);
+		retval = ch34x_data_write(ch34x_dev, (void *)arg1,
+					  bytes_write);
+		if (retval <= 0) {
+			retval = -EFAULT;
+			goto exit;
+		}
+		retval = put_user(retval, (u32 __user *)ch34x_arg);
 		break;
 	case CH34x_PIPE_WRITE_READ:
 		if (ch34x_dev->buffered_mode) {
@@ -1122,8 +1249,11 @@ static long ch34x_fops_ioctl(struct file *file, unsigned int ch34x_cmd, unsigned
 
 		arg1 = (unsigned long)((u32 __user *)ch34x_arg + 1);
 		arg2 = (unsigned long)((u8 __user *)ch34x_arg + 16);
-		arg3 = (unsigned long)((u8 __user *)ch34x_arg + 16 + MAX_BUFFER_LENGTH);
-		retval = ch34x_data_write_read(ch34x_dev, (void *)arg2, (void *)arg3, readstep, readtime, bytes_write);
+		arg3 = (unsigned long)((u8 __user *)ch34x_arg + 16 +
+				       MAX_BUFFER_LENGTH);
+		retval = ch34x_data_write_read(ch34x_dev, (void *)arg2,
+					       (void *)arg3, readstep,
+					       readtime, bytes_write);
 		if (retval <= 0) {
 			retval = -EFAULT;
 			goto exit;
@@ -1146,14 +1276,14 @@ static long ch34x_fops_ioctl(struct file *file, unsigned int ch34x_cmd, unsigned
 		if (!retval)
 			ch34x_dev->buffered_mode = false;
 		break;
-	case CH34x_QWERY_SPISLAVE_FIFO:
+	case CH34x_QWERY_SLAVE_FIFO:
 		retval = ch34x_query_slave_fifo(ch34x_dev);
 		retval = put_user(retval, (u32 __user *)ch34x_arg);
 		break;
-	case CH34x_RESET_SPISLAVE_FIFO:
+	case CH34x_RESET_SLAVE_FIFO:
 		ch34x_reset_slave_fifo(ch34x_dev);
 		break;
-	case CH34x_READ_SPISLAVE_FIFO:
+	case CH34x_READ_SLAVE_FIFO:
 		if (!ch34x_dev->buffered_mode) {
 			retval = -EINPROGRESS;
 			goto exit;
@@ -1162,12 +1292,21 @@ static long ch34x_fops_ioctl(struct file *file, unsigned int ch34x_cmd, unsigned
 		if (retval)
 			goto exit;
 		arg1 = (unsigned long)((u32 __user *)ch34x_arg + 1);
-		retval = ch34x_slave_fifo_read(ch34x_dev, (void *)arg1, bytes_to_read);
+		retval = ch34x_slave_fifo_read(ch34x_dev, (void *)arg1,
+					       bytes_to_read);
 		if (retval < 0) {
 			retval = -EFAULT;
 			goto exit;
 		}
 		retval = put_user(retval, (u32 __user *)ch34x_arg);
+		break;
+	case CH34x_INIT_SLAVE:
+		// retval = get_user(mode, (u8 __user *)ch34x_arg);
+		// if (retval)
+		// 	goto exit;
+		retval = ch34x_control_transfer_out(USB20_CMD_SLAVE_INIT,
+						    0x0000, 0x0000,
+						    ch34x_dev, NULL, 0x00);
 		break;
 	case CH34x_START_IRQ_TASK:
 		retval = ch34x_start_irq_task(ch34x_dev);
@@ -1203,7 +1342,8 @@ static int ch34x_fops_fasync(int fd, struct file *file, int on)
 }
 
 #ifdef CONFIG_COMPAT
-long ch34x_fops_compat_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+static long ch34x_fops_compat_ioctl(struct file *filp, unsigned int cmd,
+				    unsigned long arg)
 {
 	return ch34x_fops_ioctl(filp, cmd, arg);
 }
@@ -1243,15 +1383,20 @@ static void ch34x_usb_complete_intr_urb(struct urb *urb)
 	case -ENOENT:
 	case -ESHUTDOWN:
 		/* this urb is terminated, clean up */
-		dev_dbg(&ch34x_dev->interface->dev, "%s - urb shutting down with status: %d\n", __func__, status);
+		dev_dbg(&ch34x_dev->interface->dev,
+			"%s - urb shutting down with status: %d\n",
+			__func__, status);
 		return;
 	default:
-		dev_dbg(&ch34x_dev->interface->dev, "%s - nonzero urb status received: %d\n", __func__, status);
+		dev_dbg(&ch34x_dev->interface->dev,
+			"%s - nonzero urb status received: %d\n", __func__,
+			status);
 		goto exit;
 	}
 
 	for (i = 0; i < CH347_MPSI_GPIOS; i++) {
-		irq_enabled = ch34x_dev->interrupt_in_buffer[i + 3] & BIT(5);
+		irq_enabled = ch34x_dev->interrupt_in_buffer[i + 3] &
+			      BIT(5);
 		triggered = ch34x_dev->interrupt_in_buffer[i + 3] & BIT(3);
 		if (irq_enabled && triggered) {
 			kill_fasync(&ch34x_dev->fasync, SIGIO, POLL_IN);
@@ -1261,7 +1406,9 @@ static void ch34x_usb_complete_intr_urb(struct urb *urb)
 exit:
 	retval = usb_submit_urb(urb, GFP_ATOMIC);
 	if (retval && retval != -EPERM)
-		dev_err(&ch34x_dev->interface->dev, "%s - usb_submit_urb failed: %d\n", __func__, retval);
+		dev_err(&ch34x_dev->interface->dev,
+			"%s - usb_submit_urb failed: %d\n", __func__,
+			retval);
 }
 
 static void ch34x_read_buffers_free(struct ch34x_pis *ch34x_dev)
@@ -1270,12 +1417,16 @@ static void ch34x_read_buffers_free(struct ch34x_pis *ch34x_dev)
 
 	for (i = 0; i < ch34x_dev->rx_buflimit; i++) {
 		if (ch34x_dev->read_buffers[i].base)
-			usb_free_coherent(ch34x_dev->udev, ch34x_dev->readsize, ch34x_dev->read_buffers[i].base,
+			usb_free_coherent(ch34x_dev->udev,
+					  ch34x_dev->readsize,
+					  ch34x_dev->read_buffers[i].base,
 					  ch34x_dev->read_buffers[i].dma);
 	}
+	kfifo_free(&ch34x_dev->rfifo);
 }
 
-static int ch34x_submit_read_urb(struct ch34x_pis *ch34x_dev, int index, gfp_t mem_flags)
+static int ch34x_submit_read_urb(struct ch34x_pis *ch34x_dev, int index,
+				 gfp_t mem_flags)
 {
 	int res;
 
@@ -1285,7 +1436,9 @@ static int ch34x_submit_read_urb(struct ch34x_pis *ch34x_dev, int index, gfp_t m
 	res = usb_submit_urb(ch34x_dev->read_urbs[index], mem_flags);
 	if (res) {
 		if (res != -EPERM) {
-			dev_err(&ch34x_dev->interface->dev, "%s - usb_submit_urb failed: %d\n", __func__, res);
+			dev_err(&ch34x_dev->interface->dev,
+				"%s - usb_submit_urb failed: %d\n",
+				__func__, res);
 		}
 		set_bit(index, &ch34x_dev->read_urbs_free);
 		return res;
@@ -1294,7 +1447,8 @@ static int ch34x_submit_read_urb(struct ch34x_pis *ch34x_dev, int index, gfp_t m
 	return 0;
 }
 
-static int ch34x_submit_read_urbs(struct ch34x_pis *ch34x_dev, gfp_t mem_flags)
+static int ch34x_submit_read_urbs(struct ch34x_pis *ch34x_dev,
+				  gfp_t mem_flags)
 {
 	int res;
 	int i;
@@ -1308,31 +1462,25 @@ static int ch34x_submit_read_urbs(struct ch34x_pis *ch34x_dev, gfp_t mem_flags)
 	return 0;
 }
 
-static void ch34x_process_read_urb(struct ch34x_pis *ch34x_dev, struct urb *urb)
+static void ch34x_process_read_urb(struct ch34x_pis *ch34x_dev,
+				   struct urb *urb)
 {
-	int size;
-	u8 buffer[CH347_PACKET_LENGTH];
-	u16 packlen;
 	unsigned long flags;
 
 	if (!urb->actual_length)
 		return;
 
-	memcpy(buffer, urb->transfer_buffer, urb->actual_length);
-	size = urb->actual_length;
-
-	packlen = buffer[1] + (buffer[2] << 8);
-
-	if ((buffer[0] != USB20_CMD_SPI_BLCK_RD) || (packlen != size - 3))
-		return;
-
-	spin_lock_irqsave(&ch34x_dev->read_lock, flags);
-	if ((CH347_KFIFO_LENGTH - kfifo_len(&ch34x_dev->rfifo)) < packlen) {
-		dev_err(&ch34x_dev->interface->dev, "kfifo overflow.\n");
+	if (ch34x_dev->chiptype == CHIP_CH346C) {
+		spin_lock_irqsave(&ch34x_dev->read_lock, flags);
+		if ((CH346_KFIFO_LENGTH - kfifo_len(&ch34x_dev->rfifo)) <
+		    urb->actual_length) {
+			dev_err(&ch34x_dev->interface->dev,
+				"kfifo overflow.\n");
+		}
+		kfifo_in(&ch34x_dev->rfifo, urb->transfer_buffer,
+			 urb->actual_length);
+		spin_unlock_irqrestore(&ch34x_dev->read_lock, flags);
 	}
-	kfifo_in(&ch34x_dev->rfifo, buffer + 3, packlen);
-	spin_unlock_irqrestore(&ch34x_dev->read_lock, flags);
-
 	ch34x_dev->rx_flag = true;
 	wake_up_interruptible(&ch34x_dev->wait);
 }
@@ -1350,7 +1498,9 @@ static void ch34x_read_bulk_callback(struct urb *urb)
 
 	if (status) {
 		set_bit(rb->index, &ch34x_dev->read_urbs_free);
-		dev_dbg(&ch34x_dev->interface->dev, "%s - non-zero urb status: %d\n", __func__, status);
+		dev_dbg(&ch34x_dev->interface->dev,
+			"%s - non-zero urb status: %d\n", __func__,
+			status);
 		return;
 	}
 
@@ -1370,7 +1520,8 @@ static struct usb_class_driver ch34x_class = {
 	.minor_base = CH34x_MINOR_BASE,
 };
 
-static int ch34x_pis_probe(struct usb_interface *intf, const struct usb_device_id *id)
+static int ch34x_pis_probe(struct usb_interface *intf,
+			   const struct usb_device_id *id)
 {
 	struct usb_host_interface *iface_desc;
 	struct usb_endpoint_descriptor *endpoint;
@@ -1397,8 +1548,10 @@ static int ch34x_pis_probe(struct usb_interface *intf, const struct usb_device_i
 	init_waitqueue_head(&ch34x_dev->wait);
 
 	ch34x_dev->udev = usb_get_dev(interface_to_usbdev(intf));
-	ch34x_dev->ch34x_id[0] = le16_to_cpu(ch34x_dev->udev->descriptor.idVendor);
-	ch34x_dev->ch34x_id[1] = le16_to_cpu(ch34x_dev->udev->descriptor.idProduct);
+	ch34x_dev->ch34x_id[0] =
+		le16_to_cpu(ch34x_dev->udev->descriptor.idVendor);
+	ch34x_dev->ch34x_id[1] =
+		le16_to_cpu(ch34x_dev->udev->descriptor.idProduct);
 	ch34x_dev->interface = intf;
 
 	iface_desc = intf->cur_altsetting;
@@ -1406,23 +1559,31 @@ static int ch34x_pis_probe(struct usb_interface *intf, const struct usb_device_i
 	for (i = 0; i < iface_desc->desc.bNumEndpoints; ++i) {
 		endpoint = &iface_desc->endpoint[i].desc;
 
-		if ((endpoint->bEndpointAddress & USB_DIR_IN) && (endpoint->bmAttributes & 0x03) == 0x02) {
-			buffer_size = le16_to_cpu(endpoint->wMaxPacketSize);
-			ch34x_dev->bulk_in_size = buffer_size;
-			ch34x_dev->bulk_in_endpointAddr = endpoint->bEndpointAddress;
+		if ((endpoint->bEndpointAddress & USB_DIR_IN) &&
+		    (endpoint->bmAttributes & 0x03) == 0x02) {
+			buffer_size =
+				le16_to_cpu(endpoint->wMaxPacketSize);
+			ch34x_dev->bulk_in_endpointAddr =
+				endpoint->bEndpointAddress;
 
-			ch34x_dev->rx_endpoint = usb_rcvbulkpipe(ch34x_dev->udev, endpoint->bEndpointAddress);
+			ch34x_dev->rx_endpoint = usb_rcvbulkpipe(
+				ch34x_dev->udev,
+				endpoint->bEndpointAddress);
 			ch34x_dev->rx_buflimit = num_rx_buf;
-			ch34x_dev->readsize = buffer_size;
+			ch34x_dev->readsize = buffer_size * 16;
 		}
 
-		if (((endpoint->bEndpointAddress & USB_DIR_IN) == 0x00) && (endpoint->bmAttributes & 0x03) == 0x02) {
-			ch34x_dev->bulk_out_endpointAddr = endpoint->bEndpointAddress;
+		if (((endpoint->bEndpointAddress & USB_DIR_IN) == 0x00) &&
+		    (endpoint->bmAttributes & 0x03) == 0x02) {
+			ch34x_dev->bulk_out_endpointAddr =
+				endpoint->bEndpointAddress;
 		}
 
-		if ((endpoint->bEndpointAddress & USB_DIR_IN) && (endpoint->bmAttributes & 0x03) == 0x03) {
+		if ((endpoint->bEndpointAddress & USB_DIR_IN) &&
+		    (endpoint->bmAttributes & 0x03) == 0x03) {
 			ch34x_dev->interrupt_in_endpoint = endpoint;
-			epsize_intr = le16_to_cpu(endpoint->wMaxPacketSize);
+			epsize_intr =
+				le16_to_cpu(endpoint->wMaxPacketSize);
 		}
 	}
 
@@ -1437,7 +1598,8 @@ static int ch34x_pis_probe(struct usb_interface *intf, const struct usb_device_i
 	retval = usb_register_dev(intf, &ch34x_class);
 	if (retval) {
 		/* something prevented us from registering this driver */
-		dev_err(&intf->dev, "Not able to get a minor for this device.\n");
+		dev_err(&intf->dev,
+			"Not able to get a minor for this device.\n");
 		usb_set_intfdata(intf, NULL);
 		goto error;
 	}
@@ -1448,29 +1610,42 @@ static int ch34x_pis_probe(struct usb_interface *intf, const struct usb_device_i
 		ch34x_dev->chiptype = CHIP_CH347F;
 	else if (id->idProduct == 0x55e7)
 		ch34x_dev->chiptype = CHIP_CH339W;
+	else if (id->idProduct == 0x55eb)
+		ch34x_dev->chiptype = CHIP_CH346C;
 	else
 		ch34x_dev->chiptype = CHIP_CH347T;
 
 	if (ch34x_dev->interrupt_in_endpoint) {
-		ch34x_dev->interrupt_in_buffer = kmalloc(epsize_intr, GFP_KERNEL);
+		ch34x_dev->interrupt_in_buffer =
+			kmalloc(epsize_intr, GFP_KERNEL);
 		/* create URBs for handling interrupts */
-		if (!(ch34x_dev->interrupt_in_urb = usb_alloc_urb(0, GFP_KERNEL))) {
+		if (!(ch34x_dev->interrupt_in_urb =
+			      usb_alloc_urb(0, GFP_KERNEL))) {
 			dev_err(&intf->dev, "failed to alloc urb");
 			retval = -ENOMEM;
 			goto error_intrurb;
 		}
-		usb_fill_int_urb(ch34x_dev->interrupt_in_urb, ch34x_dev->udev,
-				 usb_rcvintpipe(ch34x_dev->udev, usb_endpoint_num(ch34x_dev->interrupt_in_endpoint)),
-				 ch34x_dev->interrupt_in_buffer, epsize_intr, ch34x_usb_complete_intr_urb, ch34x_dev,
-				 ch34x_dev->interrupt_in_endpoint->bInterval);
+		usb_fill_int_urb(
+			ch34x_dev->interrupt_in_urb, ch34x_dev->udev,
+			usb_rcvintpipe(
+				ch34x_dev->udev,
+				usb_endpoint_num(
+					ch34x_dev->interrupt_in_endpoint)),
+			ch34x_dev->interrupt_in_buffer, epsize_intr,
+			ch34x_usb_complete_intr_urb, ch34x_dev,
+			ch34x_dev->interrupt_in_endpoint->bInterval);
 	}
 
-	if (ch34x_dev->chiptype == CHIP_CH347F) {
+	if (ch34x_dev->chiptype == CHIP_CH346C) {
 		for (i = 0; i < num_rx_buf; i++) {
-			struct ch34x_rb *rb = &(ch34x_dev->read_buffers[i]);
+			struct ch34x_rb *rb =
+				&(ch34x_dev->read_buffers[i]);
 			struct urb *urb;
 
-			rb->base = usb_alloc_coherent(ch34x_dev->udev, ch34x_dev->readsize, GFP_KERNEL, &rb->dma);
+			rb->base = usb_alloc_coherent(ch34x_dev->udev,
+						      ch34x_dev->readsize,
+						      GFP_KERNEL,
+						      &rb->dma);
 			if (!rb->base)
 				goto error_bulkurb;
 			rb->index = i;
@@ -1483,26 +1658,32 @@ static int ch34x_pis_probe(struct usb_interface *intf, const struct usb_device_i
 			urb->transfer_flags |= URB_NO_TRANSFER_DMA_MAP;
 			urb->transfer_dma = rb->dma;
 
-			usb_fill_bulk_urb(urb, ch34x_dev->udev, ch34x_dev->rx_endpoint, rb->base, ch34x_dev->readsize,
+			usb_fill_bulk_urb(urb, ch34x_dev->udev,
+					  ch34x_dev->rx_endpoint, rb->base,
+					  ch34x_dev->readsize,
 					  ch34x_read_bulk_callback, rb);
 
 			ch34x_dev->read_urbs[i] = urb;
 			__set_bit(i, &ch34x_dev->read_urbs_free);
 		}
-		retval = kfifo_alloc(&ch34x_dev->rfifo, CH347_KFIFO_LENGTH, GFP_KERNEL);
+		retval = kfifo_alloc(&ch34x_dev->rfifo, CH346_KFIFO_LENGTH,
+				     GFP_KERNEL);
 		if (retval) {
-			dev_err(&ch34x_dev->interface->dev, "%s - kfifo_alloc failed\n", __func__);
+			dev_err(&ch34x_dev->interface->dev,
+				"%s - kfifo_alloc failed\n", __func__);
 			goto error_bulkurb;
 		}
 	}
 
 	/* let the user know what node this device is now attached to */
-	dev_info(&intf->dev, "USB device ch34x_pis #%d now attached", intf->minor);
+	dev_info(&intf->dev, "USB device ch34x_pis #%d now attached",
+		 intf->minor);
 
 	return 0;
 
 error_bulkurb:
-	if (ch34x_dev->chiptype == CHIP_CH347F) {
+	if (ch34x_dev->chiptype == CHIP_CH347F ||
+	    ch34x_dev->chiptype == CHIP_CH346C) {
 		for (i = 0; i < ch34x_dev->rx_buflimit; i++) {
 			if (ch34x_dev->read_urbs[i])
 				usb_free_urb(ch34x_dev->read_urbs[i]);
@@ -1520,7 +1701,8 @@ error:
 	return retval;
 }
 
-static int ch34x_pis_suspend(struct usb_interface *intf, pm_message_t message)
+static int ch34x_pis_suspend(struct usb_interface *intf,
+			     pm_message_t message)
 {
 	struct ch34x_pis *ch34x_dev = usb_get_intfdata(intf);
 
@@ -1573,17 +1755,17 @@ static void ch34x_usb_free_device(struct ch34x_pis *ch34x_dev)
 	if (ch34x_dev->interrupt_in_buffer)
 		kfree(ch34x_dev->interrupt_in_buffer);
 
-	if (ch34x_dev->chiptype == CHIP_CH347F) {
+	if (ch34x_dev->chiptype == CHIP_CH346C) {
 		for (i = 0; i < ch34x_dev->rx_buflimit; i++)
 			usb_free_urb(ch34x_dev->read_urbs[i]);
 		ch34x_read_buffers_free(ch34x_dev);
-		kfifo_free(&ch34x_dev->rfifo);
 	}
 }
 
 static void ch34x_delete(struct kref *kref)
 {
-	struct ch34x_pis *ch34x_dev = container_of(kref, struct ch34x_pis, kref);
+	struct ch34x_pis *ch34x_dev =
+		container_of(kref, struct ch34x_pis, kref);
 
 	usb_put_dev(ch34x_dev->udev);
 	ch34x_usb_free_device(ch34x_dev);

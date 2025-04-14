@@ -1,8 +1,6 @@
 #ifndef _CH347_LIB_H
 #define _CH347_LIB_H
 
-#include "ch341_lib.h"
-
 #pragma pack(1)
 
 #define ERR_INVAL	-1
@@ -12,16 +10,53 @@
 #define CH347_SPI_MAX_FREQ 60e6
 #define CH347_SPI_MIN_FREQ 218750
 
-#define SPI_SLAVE_MAX_LENGTH (4 * 1024 * 1024)
-
 #define IRQ_TYPE_NONE	      0
 #define IRQ_TYPE_EDGE_RISING  1
 #define IRQ_TYPE_EDGE_FALLING 2
 #define IRQ_TYPE_EDGE_BOTH    (IRQ_TYPE_EDGE_FALLING | IRQ_TYPE_EDGE_RISING)
 
+#ifndef ENUM_EEPROM_TYPE
+typedef enum _EEPROM_TYPE {
+	ID_24C01,
+	ID_24C02,
+	ID_24C04,
+	ID_24C08,
+	ID_24C16,
+	ID_24C32,
+	ID_24C64,
+	ID_24C128,
+	ID_24C256,
+	ID_24C512,
+	ID_24C1024,
+	ID_24C2048,
+	ID_24C4096
+} EEPROM_TYPE;
+#define ENUM_EEPROM_TYPE
+#endif
+
+#ifndef ENUM_CHIP_TYPE
+typedef enum _CHIP_TYPE {
+	CHIP_CH341 = 0,
+	CHIP_CH347T = 1,
+	CHIP_CH347F = 2,
+	CHIP_CH339W = 3,
+	CHIP_CH346C = 4,
+} CHIP_TYPE;
+#define ENUM_CHIP_TYPE
+#endif
+
+#ifndef ENUM_FUNCTYPE
+typedef enum {
+	TYPE_TTY = 0,
+	TYPE_HID,
+	TYPE_VCP,
+} FUNCTYPE;
+#define ENUM_FUNCTYPE
+#endif
+
 /* SPI setting structure */
 typedef struct _SPI_CONFIG {
-	uint8_t iMode; /* 0-3: SPI Mode0/1/2/3, BIT7: ch347f SPI role, 0: master, 1: slave */
+	uint8_t iMode; /* 0-3: SPI Mode0/1/2/3 */
 	uint8_t iClock; /* 0: 60MHz, 1: 30MHz, 2: 15MHz, 3: 7.5MHz, 4: 3.75MHz, 5: 1.875MHz, 6: 937.5KHz，7: 468.75KHz */
 	uint8_t iByteOrder;		/* 0: LSB, 1: MSB */
 	uint16_t iSpiWriteReadInterval; /* SPI read and write interval, unit: us */
@@ -110,7 +145,7 @@ extern "C" {
 #endif
 
 /**
- * CH347GetLibInfo - get ch347 library information
+ * CH347GetLibInfo - get library information
  */
 extern const char *CH347GetLibInfo(void);
 
@@ -131,49 +166,50 @@ extern int CH347OpenDevice(const char *pathname);
 extern bool CH347CloseDevice(int fd);
 
 /**
- * CH347ReadData - read data
- * @fd: file descriptor of device
- * @oBuffer: pointer to read buffer
- * @ioLength: pointer to read length
- *
- * The function return true if successful, false if fail.
- */
-extern bool CH347ReadData(int fd, void *oBuffer, uint32_t *ioLength);
-
-/**
- * CH347WriteData - write data
- * @fd: file descriptor of device
- * @iBuffer: pointer to write buffer
- * @ioLength: pointer to write length
- *
- * The function return true if successful, false if fail.
- */
-extern bool CH347WriteData(int fd, void *iBuffer, uint32_t *ioLength);
-
-/**
- * CH347WriteRead - write data then read
- * @fd: file descriptor of device
- * @iWriteLength: write length
- * @iWriteBuffer: pointer to write buffer
- * @iReadStep: per read length
- * @iReadTimes: read times
- * @oReadLength: pointer to read length
- * @oReadBuffer: pointer to read buffer
- *
- * The function return true if successful, false if fail.
- */
-extern bool CH347WriteRead(int fd, int iWriteLength, void *iWriteBuffer, int iReadStep, int iReadTimes,
-			   uint32_t *oReadLength, void *oReadBuffer);
-
-/**
- * CH347SetTimeout - set USB data read and write timeout
+ * CH34xSetTimeout - set USB data read and write timeout
  * @fd: file descriptor of device
  * @iWriteTimeout: data download timeout in milliseconds
  * @iReadTimeout: data upload timeout in milliseconds
  *
  * The function return true if successful, false if fail.
  */
-extern bool CH347SetTimeout(int fd, uint32_t iWriteTimeout, uint32_t iReadTimeout);
+extern bool CH34xSetTimeout(int fd, uint32_t iWriteTimeout, uint32_t iReadTimeout);
+
+/**
+ * CH34x_GetDriverVersion - get vendor driver version
+ * @fd: file descriptor of device
+ * @Drv_Version: pointer to version string
+ *
+ * The function return true if successful, false if fail.
+ */
+extern bool CH34x_GetDriverVersion(int fd, unsigned char *Drv_Version);
+
+/**
+ * CH34x_GetChipVersion - get chip version
+ * @fd: file descriptor of device
+ * @Version: pointer to version
+ *
+ * The function return true if successful, false if fail.
+ */
+extern bool CH34x_GetChipVersion(int fd, unsigned char *Version);
+
+/**
+ * CH34x_GetChipType - get chip type
+ * @fd: file descriptor of device
+ * @ChipType: pointer to chip type
+ *
+ * The function return true if successful, false if fail.
+ */
+extern bool CH34x_GetChipType(int fd, CHIP_TYPE *ChipType);
+
+/**
+ * CH34X_GetDeviceID - get device VID and PID
+ * @fd: file descriptor of device
+ * @id: pointer to store id which contains VID and PID
+ *
+ * The function return true if successful, false if fail.
+ */
+extern bool CH34X_GetDeviceID(int fd, uint32_t *id);
 
 /**
  * CH347_OE_Enable - CH347F chip OE switch
@@ -239,20 +275,6 @@ extern bool CH347SPI_Init(int fd, mSpiCfgS *SpiCfg);
 extern bool CH347SPI_GetCfg(int fd, mSpiCfgS *SpiCfg);
 
 /**
- * CH347SPI_SetChipSelect - SPI chip selection initialization
- * @fd: file descriptor of device
- * @iEnableSelect: low 8 bits: CS1, high 8 bits: CS2, byte value -> 1: set CS, 0: ignore CS setting
- * @iChipSelect: low 8 bits: CS1, high 8 bits: CS2, CS output, byte value -> 1: set CS, 0: cancel CS
- * @iIsAutoDeativeCS: low 16 bits: CS1, high 16 bits: CS2, automatically undo the CS after operation completed
- * @iActiveDelay: low 16 bits: CS1, high 16 bits: CS2, delay time of read and write operation after setting CS, unit: us
- * @iDelayDeactive: low 16 bits: CS1, high 16 bits: CS2,, delay time of read and write operation after canceling CS, unit: us
- *
- * The function return true if successful, false if fail.
- */
-extern bool CH347SPI_SetChipSelect(int fd, uint16_t iEnableSelect, uint16_t iChipSelect, int iIsAutoDeativeCS,
-				   int iActiveDelay, int iDelayDeactive);
-
-/**
  * CH347SPI_ChangeCS - SPI CS setting, must call CH347SPI_Init first
  * @fd: file descriptor of device
  * @iStatus: 0: cancel CS, 1: set CS
@@ -272,7 +294,7 @@ extern bool CH347SPI_ChangeCS(int fd, uint8_t iStatus);
  *
  * The function return true if successful, false if fail.
  */
-extern bool CH347SPI_Write(int fd, bool ignoreCS, int iChipSelect, int iLength, int iWriteStep, void *ioBuffer);
+extern bool CH347SPI_Write(int fd, bool ignoreCS, uint8_t iChipSelect, int iLength, int iWriteStep, void *ioBuffer);
 
 /**
  * CH347SPI_Read - read SPI data
@@ -285,7 +307,7 @@ extern bool CH347SPI_Write(int fd, bool ignoreCS, int iChipSelect, int iLength, 
  *
  * The function return true if successful, false if fail.
  */
-extern bool CH347SPI_Read(int fd, bool ignoreCS, int iChipSelect, int iLength, uint32_t *oLength, void *ioBuffer);
+extern bool CH347SPI_Read(int fd, bool ignoreCS, uint8_t iChipSelect, int iLength, uint32_t *oLength, void *ioBuffer);
 
 /**
  * CH347SPI_WriteRead - write then read SPI data
@@ -297,43 +319,7 @@ extern bool CH347SPI_Read(int fd, bool ignoreCS, int iChipSelect, int iLength, u
  *
  * The function return true if successful, false if fail.
  */
-extern bool CH347SPI_WriteRead(int fd, bool ignoreCS, int iChipSelect, int iLength, void *ioBuffer);
-
-/**
- * CH347SPI_Slave_Control - switch of reading SPI data from master 
- * @fd: file descriptor of device
- * @enable: true: start reading continuously, false: stop reading
- *
- * The function return true if successful, false if fail.
- */
-extern bool CH347SPI_Slave_Control(int fd, bool enable);
-
-/**
- * CH347SPI_Slave_QweryData - get spi data length
- * @fd: file descriptor of device
- * @oLength: pointer to read length
- *
- * The function return true if successful, false if fail.
- */
-extern bool CH347SPI_Slave_QweryData(int fd, uint32_t *oLength);
-
-/**
- * CH347SPI_Slave_FIFOReset - reset spi data fifo
- * @fd: file descriptor of device
- *
- * The function return true if successful, false if fail.
- */
-extern bool CH347SPI_Slave_FIFOReset(int fd);
-
-/**
- * CH347SPI_Slave_ReadData - read spi data in slave mode
- * @fd: file descriptor of device
- * @oReadBuffer: pointer to read buffer
- * @oReadLength: pointer to read length
- *
- * The function return true if successful, false if fail.
- */
-extern bool CH347SPI_Slave_ReadData(int fd, void *oReadBuffer, uint32_t *oReadLength);
+extern bool CH347SPI_WriteRead(int fd, bool ignoreCS, uint8_t iChipSelect, int iLength, void *ioBuffer);
 
 /**
  * CH347Jtag_Reset - Reset Tap Status, more than six consecutive TCK and TMS is high 
@@ -705,6 +691,24 @@ extern bool CH347I2C_Set(int fd, int iMode);
  * The function return true if successful, false if fail.
  */
 extern bool CH347I2C_SetStretch(int fd, bool enable);
+
+/**
+ * CH347I2C_SetDriveMode - I2C signal drive mode control
+ * @fd: file descriptor of device
+ * @mode: 0: open-drain, 1: push-pull
+ *
+ * The function return true if successful, false if fail.
+ */
+extern bool CH347I2C_SetDriveMode(int fd, uint8_t mode);
+
+/**
+ * CH347I2C_SetIgnoreNack - controls whether the I2C signal continues when it detects NACK
+ * @fd: file descriptor of device
+ * @mode: 0: stop, 1: continue
+ *
+ * The function return true if successful, false if fail.
+ */
+extern bool CH347I2C_SetIgnoreNack(int fd, uint8_t mode);
 
 /**
  * CH347I2C_SetDelaymS - delay operation

@@ -45,7 +45,7 @@
 
 struct ch34x {
 	int fd;
-	char version[100];
+	unsigned char version[100];
 	CHIP_TYPE chiptype;
 	uint32_t dev_id;
 };
@@ -144,7 +144,7 @@ bool Flash_Block_Read_Test()
 	double UseT;
 	uint32_t DataLen, FlashAddr, i;
 	uint8_t ioBuffer[8192] = { 0 };
-	char FmtStr[512] = "", FmtStr1[8 * 1024 * 3 + 16] = "";
+	char FmtStr1[8 * 1024 * 3 + 16] = "";
 
 	static struct timeval t1, t2;
 	int delta_sec, delta_usec;
@@ -320,14 +320,10 @@ exit:
 bool EEPROM_Read()
 {
 	bool ret = false;
-	EEPROM_TYPE eeprom;
-	int iAddr;
 	int iLength;
 	int i;
 	uint8_t oBuffer[256] = { 0 };
 
-	eeprom = ID_24C02;
-	iAddr = 0;
 	iLength = 256;
 
 	ret = CH34xReadEEPROM(ch341device.fd, ID_24C02, 0, iLength, oBuffer);
@@ -649,12 +645,9 @@ void ch34x_demo_mem_parport_operate()
 
 bool Show_DevMsg(char *pathname)
 {
-	unsigned char buf[256];
 	int ret;
-	int i;
 	uint16_t vendor, product;
 	CHIP_TYPE chiptype;
-	unsigned char chipver;
 
 	/* Get Driver Version */
 	ret = CH34x_GetDriverVersion(ch341device.fd, ch341device.version);
@@ -670,14 +663,6 @@ bool Show_DevMsg(char *pathname)
 		printf("CH34x_GetChipType error.\n");
 		goto exit;
 	}
-
-	/* Get Chip Version */
-	ret = CH34x_GetChipVersion(ch341device.fd, &chipver);
-	if (ret == false) {
-		printf("CH34x_GetChipVersion error.\n");
-		goto exit;
-	}
-	printf("Chip version: 0x%2x\n", chipver);
 
 	/* Get Device ID */
 	ret = CH34X_GetDeviceID(ch341device.fd, &ch341device.dev_id);

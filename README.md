@@ -1,10 +1,10 @@
-# ch341/ch347/ch339 linux SDK
+# ch341/ch347/ch339/ch346 linux SDK
 
 ## Description
 
-This directory contains 3 parts, usb device driver, application library and examples. This driver and applications support usb bus interface chip ch341/ch347/ch339.
+This directory contains 3 parts, usb device driver, application library and examples. This driver and applications support usb bus interface chip ch341/ch347/ch339/ch346.
 
-ch341 implements full-speed usb to uart/spi/i2c/gpio/parport/etc., ch347 implements high-speed usb to uart/jtag/swd/spi/i2c/gpio/etc., ch339 implements high-speed usb hub/card reader/ethernet and usb to uart/jtag/spi/i2c/gpio/etc., This driver is not applicable to uart.
+ch341 implements full-speed usb to uart/spi/i2c/gpio/parport/etc., ch347 implements high-speed usb to uart/jtag/swd/spi/i2c/gpio/etc., ch339 implements high-speed usb hub/card reader/ethernet and usb to uart/jtag/spi/i2c/gpio/etc., ch347 implements high-speed usb to fifo/etc., this driver is not applicable to uart.
 
 ## Driver Operating Overview
 
@@ -16,15 +16,15 @@ ch341 implements full-speed usb to uart/spi/i2c/gpio/parport/etc., ch347 impleme
 6. Type "sudo make install" to make the driver work permanently
 7. Type "sudo make uninstall" to remove the driver
 
-Before the driver works, you should make sure that the ch341/ch347/ch339 device has been plugged in and is working properly, you can use shell command "lsusb" or "dmesg" to confirm that, VID of ch341/ch347/ch339 is [1A86].
+Before the driver works, you should make sure that the ch341/ch347/ch339/ch346 device has been plugged in and is working properly, you can use shell command "lsusb" or "dmesg" to confirm that, VID of ch341/ch347/ch339/ch346 is [1A86].
 
-If ch341/ch347/ch339 device works well, the driver will created devices named "ch34x_pis*" in /dev directory.
+If ch341/ch347/ch339/ch346 device works well, the driver will created devices named "ch34x_pis*" in /dev directory.
 
 ## Application Operating Overview
 
-1. Copy the dynamic library in "lib" directory to system default library path: "sudo cp libch347.so /usr/lib"
-2. Switch to "demo" directory
-3. Type "gcc ch347_demo.c -o app -lch347" to compile the demo
+1. Copy the dynamic library in "lib" directory to system default library path: "sudo cp libch347.so /usr/lib".
+2. Switch to "demo" directory, ch341 directory supports ch341 only, ch347 directory supports ch347/ch339, ch346 directory supports ch346 only.
+3. Type "gcc ch347_demo.c -o app -lch347" to compile the demo.
 
 ## Note
 
@@ -54,8 +54,18 @@ mode0: [uart * 2 + spi + i2c + jtag] in vcp driver mode, the devices are named /
 
 when the mode supports uart/jtag/spi/i2c/gpio in vcp driver mode, the devices are named /dev/ch34x_pis* and /dev/tty*, the details you can refer to the datasheet.
 
-This driver only can be used with **ch341 mode1**, **ch347t mode1/mode3**, **ch347f**, **several modes of ch339w**.
+**ch346c supports 3 mode:**
 
-This application library and examples can be used with all modes.
+mode0: [fifo + uart * 1] in vcp driver mode, the devices are named /dev/ch34x_pis* and /dev/tty*
+
+mode1: [spi + uart * 1] in vcp driver mode, the devices are named /dev/ch34x_pis* and /dev/tty*
+
+mode2: [uart * 2] in vcp/cdc driver mode, the devices are named /dev/tty*
+
+
+
+This driver only can be used with **ch341 mode1**, **ch347t mode1/mode3**, **ch347f**, **several modes of ch339w**, **ch346c mode0/mode1**.
+
+This application library and examples can be used with modes exclude **ch346c mode2**.
 
 Any question, you can send feedback to mail: tech@wch.cn
