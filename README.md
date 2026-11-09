@@ -1,71 +1,75 @@
-# ch341/ch347/ch339/ch346 linux SDK
+# CH341/CH346/CH347/CH339/CH9341/CH9346 Linux SDK Instruction
 
-## Description
+## Introduction
 
-This directory contains 3 parts, usb device driver, application library and examples. This driver and applications support usb bus interface chip ch341/ch347/ch339/ch346.
+This directory consists of 3 parts: the USB device driver, the application library, and sample code. This driver and application support the USB bus interface chips from WCH (Qinheng Microelectronics): CH341, CH346, CH347, CH339, CH9341, CH9346, as well as the WCH USB-to-serial series chips.
 
-ch341 implements full-speed usb to uart/spi/i2c/gpio/parport/etc., ch347 implements high-speed usb to uart/jtag/swd/spi/i2c/gpio/etc., ch339 implements high-speed usb hub/card reader/ethernet and usb to uart/jtag/spi/i2c/gpio/etc., ch347 implements high-speed usb to fifo/etc., this driver is not applicable to uart.
+- **CH341:** Achieves Full-Speed USB to UART/SPI/I2C/GPIO/printer parallel port, etc.
+- **CH346:** Achieves High-Speed USB to FIFO/UART, etc.
+- **CH347:** Achieves High-Speed USB to UART/JTAG/SWD/SPI/I2C/GPIO, etc.
+- **CH339:** Achieves High-Speed USB Hub / Card Reader / Ethernet, and USB to UART/JTAG/SPI/I2C/GPIO, etc.
+- **CH9341:** Achieves Full-Speed USB to SPI/I2C/GPIO/PWM, etc.
+- **CH9346:** Achieves SuperSpeed USB to FIFO/UART, etc.
 
-## Driver Operating Overview
+> ⚠️ **Note:** This device driver does not include the Linux TTY serial device driver; it is only used to implement other interface functions such as SPI / I2C / GPIO / PWM. When accessing USB-to-serial devices using the device management and serial APIs provided in this SDK package, you need to load the VCP vendor driver for the serial port.
 
-1. Open "Terminal"
-2. Switch to "driver" directory
-3. Compile the driver using "make", you will see the module "ch34x_pis.ko" if successful
-4. Type "sudo make load" or "sudo insmod ch34x_pis.ko" to load the driver dynamically
-5. Type "sudo make unload" or "sudo rmmod ch34x_pis.ko" to unload the driver
-6. Type "sudo make install" to make the driver work permanently
-7. Type "sudo make uninstall" to remove the driver
+## Driver Operation Guide
 
-Before the driver works, you should make sure that the ch341/ch347/ch339/ch346 device has been plugged in and is working properly, you can use shell command "lsusb" or "dmesg" to confirm that, VID of ch341/ch347/ch339/ch346 is [1A86].
+1. Open the "Terminal".
+2. Switch to the `driver` directory.
+3. Enter `make` to compile the driver. If the compilation is successful, you will see the generated kernel module file `ch34x_pis.ko`.
+4. Enter `sudo make load` or `sudo insmod ch34x_pis.ko` to dynamically load the driver.
+5. Enter `sudo make unload` or `sudo rmmod ch34x_pis.ko` to unload the driver.
+6. Enter `sudo make install` to make the driver persistent (install it into the system).
+7. Enter `sudo make uninstall` to uninstall and remove the driver.
 
-If ch341/ch347/ch339/ch346 device works well, the driver will created devices named "ch34x_pis*" in /dev directory.
+Before the driver can function normally, please ensure that the USB device is plugged in and working properly. You can verify this using the terminal commands `lsusb` or `dmesg`. The Vendor ID (VID) for all the aforementioned chips is **[1A86]**.
 
-## Application Operating Overview
+If the device is working properly, the driver will create a device node named `/dev/ch34x_pis*` after it is loaded.
 
-1. Copy the dynamic library in "lib" directory to system default library path: "sudo cp libch347.so /usr/lib".
-2. Switch to "demo" directory, ch341 directory supports ch341 only, ch347 directory supports ch347/ch339, ch346 directory supports ch346 only.
-3. Type "gcc ch347_demo.c -o app -lch347" to compile the demo.
+## Application Operation Guide
 
-## Note
+1. Copy the dynamic link library from the `lib` directory to the system's default library path:
 
-**ch341 supports 3 modes:**
+   ```
+   sudo cp libch34x.so /usr/lib
+   ```
 
-mode0: [uart]
+2. Switch to the `demo` directory.
 
-mode1: [spi + i2c + parallel + gpio]
+3. Enter the following command to compile the sample program:
 
-mode2: [printer]
+   ```
+   gcc ch34x_demo.c eeprom_xx24.c flash_xx25.c -o app -lch34x
+   ```
 
-**ch347t supports 4 modes:**
+## Notes
 
-mode0: [uart * 2] in vcp/cdc driver mode, the devices are named /dev/tty*
+The working modes supported by each chip are as follows:
 
-mode1: [spi + i2c + uart * 1] in vcp driver mode, the devices are named /dev/ch34x_pis* and /dev/tty*
+### Chip Working Mode List
 
-mode2: [spi + i2c + uart * 1] in hid driver mode, the devices are named /dev/hidraw*
+| **Chip Model** | **Mode**                             | **Supported Functions and Device Names**                     |
+| -------------- | ------------------------------------ | ------------------------------------------------------------ |
+| **CH341F/A/B** | Mode 0<br>Mode 1<br>Mode 2           | `[UART]` (Vendor driver mode, device name: `/dev/ttyCH*`)<br> `[SPI + I2C + Parallel Port + GPIO]` (Vendor driver mode, device names: `/dev/ch34x_pis*` and `/dev/ttyCH*`)<br> `[Printer]` (USB Printer class driver mode, device name: `/dev/usb/lp*`) |
+| **CH341T**     | Mode 0<br>Mode 1                     | `[UART]` (Vendor driver mode, device name: `/dev/ttyCH*`)<br> `[I2C + GPIO]` (Vendor driver mode, device name: `/dev/ch34x_pis*`) |
+| **CH347T**     | Mode 0<br>Mode 1<br>Mode 2<br>Mode 3 | `[UART * 2]` (Vendor driver mode, device name: `/dev/ttyCH*`)<br> `[SPI + I2C + UART + GPIO]` (Vendor driver mode, device names: `/dev/ch34x_pis*` and `/dev/ttyCH*`)<br> `[SPI + I2C + UART]` (HID driver mode, device name: `/dev/hidraw*`)<br> `[JTAG + UART + GPIO]` (Vendor driver mode, device names: `/dev/ch34x_pis*` and `/dev/ttyCH*`) |
+| **CH347F**     | Mode 0                               | `[UART * 2 + SPI + I2C + JTAG]` (Vendor driver mode, device names: `/dev/ch34x_pis*` and `/dev/ttyCH*`) |
+| **CH339W**     | Multi-Mode                           | Supports `UART/JTAG/SPI/I2C/GPIO` etc., when working in Vendor driver mode, with device names `/dev/ch34x_pis*` and `/dev/ttyCH*`. Please refer to the datasheet for details. |
+| **CH346C**     | Mode 0<br>Mode 1<br>Mode 2           | `[FIFO + UART]` (Vendor driver mode, device names: `/dev/ch34x_pis*` and `/dev/ttyCH*`)<br> `[SPI + UART]` (Vendor driver mode, device names: `/dev/ch34x_pis*` and `/dev/ttyCH*`)<br> `[UART]` (VCP driver mode, device name: `/dev/ttyCH*`) |
+| **CH9341C**    | Mode 0                               | `[SPI + I2C + GPIO + PWM]` (Device names: `/dev/ch34x_pis*` and `/dev/ttyCH*`) |
+| **CH9346W**    | Mode 0<br/>Mode 1<br/>Mode 2         | `[FIFO]` (Vendor driver mode, device name: `/dev/ch34x_pis*`)<br>`[MEDIA + UART]` (UVC class driver mode, device names: `/dev/video*` and `/dev/ttyACM*`)<br> `[DVP + UART]` (UVC class driver mode, device names: `/dev/video*` and `/dev/ttyACM*`) \| |
 
-mode3: [jtag + uart * 1] in vcp driver mode, the devices are named /dev/ch34x_pis* and /dev/tty*
+### Drivers Applicable to Specific Chips and Modes
 
-**ch347f supports 1 mode:**
+- **CH341F/A/B/T:** Mode 1
+- **CH347T:** Mode 1 / Mode 3
+- **CH347F:** Mode 0
+- **CH339W:** Certain specific modes
+- **CH346C:** Mode 0 / Mode 1
+- **CH9341C:** Mode 0
+- **CH9346W:** Mode 0
 
-mode0: [uart * 2 + spi + i2c + jtag] in vcp driver mode, the devices are named /dev/ch34x_pis* and /dev/tty*
+In any other cases, there is no need to load this driver program.
 
-**ch339w supports many modes:**
-
-when the mode supports uart/jtag/spi/i2c/gpio in vcp driver mode, the devices are named /dev/ch34x_pis* and /dev/tty*, the details you can refer to the datasheet.
-
-**ch346c supports 3 mode:**
-
-mode0: [fifo + uart * 1] in vcp driver mode, the devices are named /dev/ch34x_pis* and /dev/tty*
-
-mode1: [spi + uart * 1] in vcp driver mode, the devices are named /dev/ch34x_pis* and /dev/tty*
-
-mode2: [uart * 2] in vcp/cdc driver mode, the devices are named /dev/tty*
-
-
-
-This driver only can be used with **ch341 mode1**, **ch347t mode1/mode3**, **ch347f**, **several modes of ch339w**, **ch346c mode0/mode1**.
-
-This application library and examples can be used with modes exclude **ch346c mode2**.
-
-Any question, you can send feedback to mail: tech@wch.cn
+If you have any questions, you can send technical feedback to the email: tech@wch.cn
