@@ -429,7 +429,7 @@ static int CH34X_Demo_I2C_Master_Init(int fd)
 	    gCH34XDevice[iIndex].ChipType == CHIP_CH347T_HID ||
 	    gCH34XDevice[iIndex].ChipType == CHIP_CH347F_VENDOR ||
 	    gCH34XDevice[iIndex].ChipType == CHIP_CH339W_VENDOR) {
-		I2CMasterCfg.I2C_Clock = 750 * 1000; /* I2C clock */
+		I2CMasterCfg.I2C_Clock = 100 * 1000; /* I2C clock */
 		/* The following parameters are only supported by CH347T */
 		if (gCH34XDevice[iIndex].ChipType == CHIP_CH347T_VENDOR ||
 		    gCH34XDevice[iIndex].ChipType == CHIP_CH347T_HID ||
@@ -444,7 +444,7 @@ static int CH34X_Demo_I2C_Master_Init(int fd)
 				0; /* Setting I2C read delay between the 8th clock edge and the 9th clock edge */
 		}
 	} else if (gCH34XDevice[iIndex].ChipType == CHIP_CH9341C_VENDOR) {
-		I2CMasterCfg.I2C_Clock = 750 * 1000; /* I2C clock */
+		I2CMasterCfg.I2C_Clock = 100 * 1000; /* I2C clock */
 		I2CMasterCfg.I2C_Stretch_Timeout =
 			10; /* Setting I2C clock stretching SCL detection timeout to 1ms */
 		/* Valid when I2C clock > 100KHz */
@@ -1871,7 +1871,8 @@ static int CH34X_Demo_GPIO_Output_Test(int fd)
 	       gCH34XDevice[iIndex].MaxGPIOChannel - 1);
 	usleep(200 * 1000);
 	for (iCh = 0; iCh < gCH34XDevice[iIndex].MaxGPIOChannel; iCh++) {
-		retval = CH34X_GPIOSet(fd, iGPIOChannel, UINT64_C(1) << iCh);
+		retval = CH34X_GPIOSet(fd, iGPIOChannel,
+				       UINT64_C(1) << iCh);
 		if (retval) {
 			printf("CH34X_GPIOSet Error, Code: %d.\n", retval);
 			goto exit;
@@ -2431,11 +2432,11 @@ static int CH34X_Demo_PWM_Init(int fd)
 			1; /* PWM polarity setting: active high */
 		pPWMCfg[iCh].PWM_Start = 0; /* PWM output off */
 		pPWMCfg[iCh].PWM_Cycle =
-			10 *
-			1000000; /* PWM output cycle number setting, PWM output time = cycle number * clock cycle, CH9341 clock cycle: 1/96 us */
+			20 * 96 *
+			1000; /* PWM output cycle number setting, PWM output time = cycle number * clock cycle, CH9341 clock cycle: 1/96 us */
 		pPWMCfg[iCh].PWM_DutyCycle =
-			5 *
-			1000000; /* PWM output duty cycle setting, duty cycle = PWM_DutyCycle/PWM_Cycle = 50% */
+			10 * 96 *
+			1000; /* PWM output duty cycle setting, duty cycle = PWM_DutyCycle/PWM_Cycle = 50% */
 		pPWMCfg[iCh].PWM_RepeatTimes =
 			10; /* PWM output repeat times setting: 10 */
 
@@ -2465,6 +2466,8 @@ static int CH34X_Demo_PWM_Init(int fd)
 		printf("\tPWMCfg.PWM_Cycle: %d\n", pPWMCfg[iCh].PWM_Cycle);
 		printf("\tPWMCfg.PWM_DutyCycle: %d\n",
 		       pPWMCfg[iCh].PWM_DutyCycle);
+		printf("\tPWMCfg.PWM_RepeatTimes: %d\n",
+		       pPWMCfg[iCh].PWM_RepeatTimes);
 		printf("\n");
 	}
 
